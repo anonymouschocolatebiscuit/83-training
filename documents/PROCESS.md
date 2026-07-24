@@ -7,6 +7,8 @@
 
 Claude Code，模型 Opus 4.8（1M context）。用兩個唯讀子代理做交叉驗證（開工前驗分析、收工前 review 全 diff）。
 
+> 📄 **完整執行紀錄**：每一步「被要求做什麼 → 我做了什麼 → 結果」的逐步流水帳（含每個 bug 修復前的失敗測試輸出、頁面實測數據、以及 commit 對照表）另存於專案根目錄的 [`EXECUTION-LOG.md`](../EXECUTION-LOG.md)，供 PiC / reviewer 參考。
+
 ---
 
 ## 通用四問
