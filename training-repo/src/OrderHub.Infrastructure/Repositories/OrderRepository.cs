@@ -57,6 +57,18 @@ public class OrderRepository : IOrderRepository
             .OrderByDescending(o => o.CreatedAt)
             .ToListAsync();
 
+    public async Task<IReadOnlyDictionary<int, int>> GetSoldQuantitiesSinceAsync(DateTime sinceUtc)
+    {
+        // 單一 group 查詢，避免逐商品 N+1。排除已取消訂單，只計 sinceUtc 之後（含）建立的訂單。
+        var sold = await _db.OrderItems
+            .Where(i => i.Order!.Status != OrderStatus.Cancelled && i.Order.CreatedAt >= sinceUtc)
+            .GroupBy(i => i.ProductId)
+            .Select(g => new { ProductId = g.Key, Quantity = g.Sum(x => x.Quantity) })
+            .ToListAsync();
+
+        return sold.ToDictionary(x => x.ProductId, x => x.Quantity);
+    }
+
     public async Task AddAsync(Order order) => await _db.Orders.AddAsync(order);
 
     public Task SaveChangesAsync() => _db.SaveChangesAsync();
