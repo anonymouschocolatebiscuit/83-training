@@ -23,32 +23,32 @@
     <p class="text-muted">
         庫存低於 <strong>@Model.EffectiveThreshold</strong> 且販售中的商品，依庫存量升冪排序；庫存低於 5 以警示色標記。
     </p>
-}
 
-<table class="table table-hover align-middle">
-    <thead>
-        <tr>
-            <th>SKU</th>
-            <th>名稱</th>
-            <th class="text-end">現有庫存</th>
-            <th class="text-end">近 30 天售出</th>
-        </tr>
-    </thead>
-    <tbody>
-        @if (Model.Products.Count == 0)
-        {
+    <table class="table table-hover align-middle">
+        <thead>
             <tr>
-                <td colspan="4" class="text-center text-muted py-4">沒有符合條件的商品</td>
+                <th>SKU</th>
+                <th>名稱</th>
+                <th class="text-end">現有庫存</th>
+                <th class="text-end">近 30 天售出</th>
             </tr>
-        }
-        @foreach (var product in Model.Products)
-        {
-            <tr class="@(product.StockQuantity < 5 ? "table-danger" : null)">
-                <td>@product.Sku</td>
-                <td>@product.Name</td>
-                <td class="text-end">@product.StockQuantity</td>
-                <td class="text-end">@product.SoldLast30Days</td>
-            </tr>
-        }
-    </tbody>
-</table>
+        </thead>
+        <tbody>
+            @if (Model.Products.Count == 0)
+            {
+                <tr>
+                    <td colspan="4" class="text-center text-muted py-4">沒有符合條件的商品</td>
+                </tr>
+            }
+            @foreach (var product in Model.Products)
+            {
+                <tr class="@(product.StockQuantity < 5 ? "table-danger" : null)">
+                    <td>@product.Sku</td>
+                    <td>@product.Name</td>
+                    <td class="text-end">@product.StockQuantity</td>
+                    <td class="text-end">@product.SoldLast30Days</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}

@@ -6,8 +6,6 @@ namespace OrderHub.Web.Controllers;
 
 public class ProductsController : Controller
 {
-    private const int DefaultThreshold = 10;
-
     private readonly IProductService _productService;
 
     public ProductsController(IProductService productService)
@@ -39,7 +37,7 @@ public class ProductsController : Controller
         // threshold <= 0 由 ViewModel 的 DataAnnotations 擋下；此時只回表單顯示錯誤、不查資料。
         if (ModelState.IsValid)
         {
-            var items = await _productService.GetLowStockAsync(vm.Threshold ?? DefaultThreshold);
+            var items = await _productService.GetLowStockAsync(vm.EffectiveThreshold);
 
             vm.Products = items
                 .Select(i => new LowStockRowViewModel
