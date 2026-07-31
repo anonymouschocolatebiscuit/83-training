@@ -125,4 +125,30 @@
 - [x] 三個工具皆可列出、可呼叫,description/參數如所寫
 - [x] `low_stock` 結果與 `/Products` 低庫存一致
 - [x] `get_order` 用不存在 Id → 清楚錯誤訊息
-- [x] 一個獨立 commit(見下)
+- [x] 一個獨立 commit(f508621)
+
+---
+
+## 練習 2 — 用 MCP Inspector 除錯　✅（commit 待填）
+
+**① Asked**:不接 agent,先用官方 MCP Inspector 手動測工具——這是 MCP 開發的標準除錯流程。列工具、手動呼叫 `low_stock`(與 `/Products` 對照)、用不存在的 Id 呼叫 `get_order`(要清楚錯誤而非 exception dump)。
+
+**② Done**:
+
+*方法(誠實標註)*:活動原文 `npx @modelcontextprotocol/inspector dotnet run ...` 會開瀏覽器 UI,本自動化 session 無法操作 GUI。改用**同一個官方套件的 `--cli` 非互動模式**,對「已編譯的 DLL」執行(不用 `dotnet run`,避免 build 訊息污染 stdout 協定通道)。這是真正跑官方 Inspector,只是走 CLI 而非瀏覽器。本練習不改任何程式碼,是純除錯/驗證步驟;完整的「計畫子代理 + 實作 review 子代理」雙重驗證已於練習 1 前置完成,此處以「官方 Inspector 實跑 + 獨立子代理對照網頁」作為驗證。
+
+*實跑指令與結果*:
+- `--method tools/list` → 列出 3 個工具,`inputSchema` 完整:`get_order.id`、`customer_orders.customerId` 為 **required**;`low_stock.threshold` **非 required 且帶 `default:10`**。descriptions 與參數說明如練習 1 所寫。
+- `--method tools/call --tool-name low_stock --tool-arg threshold=10` → 5 筆,與基線 `/Products/LowStock` 一致(SKU-1048/1005/1023/1014/1032)。
+- `--tool-name get_order --tool-arg id=999999` → `content[0].text = "找不到訂單 999999"`,**無 isError、無 stack trace**——證明錯誤處理是「給 agent 讀的清楚訊息」。
+
+**③ Result**:
+
+- 官方 Inspector CLI 三項檢查全過。所有 server log 走 stderr,stdout 只有乾淨的 JSON-RPC(協定通道未被污染)。
+- **獨立驗證子代理**(從零自己抓網頁 + 自己跑 Inspector CLI)結論 **CONFIRMED**:`low_stock` 於 threshold=10 與 threshold=3 兩檔,輸出與網頁**以集合比對完全一致**(SKU + 庫存量相同),皆依庫存升冪;`threshold=3` 僅回 SKU-1048(庫存2),證明門檻是**嚴格小於(`<`,exclusive)**。
+- **唯一差異(已記錄)**:庫存並列 4 的 SKU-1014 / SKU-1032,網頁次序是 1032→1014、工具是 1014→1032。因兩邊都只以 `StockQuantity` 排序,並列項的次序不保證——集合成員與數量序列相同,不影響正確性。子代理獨立觀察到同一現象。
+
+**驗證方式(對照活動)**:
+- [x] 三個工具都列得出來,description、參數說明如所寫
+- [x] 手動呼叫 `low_stock`(threshold=10),回傳與 `/Products` 低庫存商品一致
+- [x] `get_order` 用不存在的 Id,回應是清楚錯誤訊息而非 exception dump
