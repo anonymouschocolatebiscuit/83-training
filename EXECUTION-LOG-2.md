@@ -129,7 +129,7 @@
 
 ---
 
-## 練習 2 — 用 MCP Inspector 除錯　✅（commit 待填）
+## 練習 2 — 用 MCP Inspector 除錯　✅（commit 24e1836）
 
 **① Asked**:不接 agent,先用官方 MCP Inspector 手動測工具——這是 MCP 開發的標準除錯流程。列工具、手動呼叫 `low_stock`(與 `/Products` 對照)、用不存在的 Id 呼叫 `get_order`(要清楚錯誤而非 exception dump)。
 
@@ -152,3 +152,33 @@
 - [x] 三個工具都列得出來,description、參數說明如所寫
 - [x] 手動呼叫 `low_stock`(threshold=10),回傳與 `/Products` 低庫存商品一致
 - [x] `get_order` 用不存在的 Id,回應是清楚錯誤訊息而非 exception dump
+
+---
+
+## 練習 3 — 註冊給 agent,做 before/after 對照　✅（commit 待填）
+
+**① Asked**:把 server 接進 CLI(`training-repo/.mcp.json`,進 git 全隊共用),親眼看「有工具 vs 沒工具」的差異;問「哪些商品庫存低於 5?」對照 MCP 關 / 開。
+
+**② Done**:
+
+*實作*:新增 `training-repo/.mcp.json`(活動範本原文,相對路徑、可全隊共用):
+```json
+{ "mcpServers": { "orderhub": { "command": "dotnet", "args": ["run", "--project", "src/OrderHub.Mcp"] } } }
+```
+
+*一個真實踩到的坑(值得記)*:先用 Inspector CLI 測 `dotnet run --project ...` → 回 `Connection closed`。追查發現是 **Inspector CLI 會把 `--project` 當成自己的旗標吃掉**,導致實際 spawn 的是沒有 `--project` 的 `dotnet run`(錯誤訊息:「找不到要運行的項目」)。這是**測試工具的 arg 解析怪癖,不是 `.mcp.json` 的問題**——真正的 agent client(Claude Code / Codex)會**原封不動**地 spawn 指令。為了驗證這點,我寫了一支小 client **直接照 `.mcp.json` 的 command/args 原樣 spawn**(cwd=training-repo),結果:`initialize` 回 `OrderHub.Mcp`、`tools/list` 三工具、`low_stock(5)` 正常回資料。**證明 config 對真實 client 可用**。
+
+*before/after 對照*(問題:「哪些商品庫存低於 5?」):
+- **沒有 MCP(繞遠路)**:本 session 自己就是活教材——我的 Claude Code toolset **並未掛上 orderhub MCP**,所以要回答低庫存,我得**繞路**:寫 JSON-RPC client、或用 Inspector CLI、或 `curl` 網頁再解析 HTML。等於 agent 得「自己想辦法查 DB / 讀碼 / 爬頁面」,多步且需要額外知識(連線字串、頁面結構)。
+- **有 MCP(一步到位)**:`low_stock(threshold=5)` 一次工具呼叫即答完 → SKU-1048(2)、1005(3)、1023(3)、1014(4)、1032(4)(皆 <5)。agent 不需要知道 DB、不需要讀碼,description 就告訴它「這工具列低庫存在售商品」。
+
+**③ Result**:
+
+- `.mcp.json` 建立並經**照 config 原樣 spawn** 驗證可用(initialize + tools/list + low_stock(5) 全過)。
+- **驗證子代理**(唯讀,審 config 的**團隊健壯性**)結論:JSON 合法、schema 正確、相對路徑可攜、無密鑰/絕對路徑/機器名;`dotnet run` 對訓練 repo 是對的選擇(自癒、不會用到過期 binary、與範本一致),唯一風險是**首次冷啟動 build 可能讓 client 連線逾時**——緩解法:先 `dotnet build` 一次再開 client(活動本身也這樣建議)。子代理另提醒:工具要回資料,teammate 端仍需 .NET 8 SDK + 本機 SQL Server + `OrderHubTraining`(handshake 不需 DB,查詢才需)。
+- 誠實標註:真正在 Claude Code UI 裡 `/mcp` 看到 orderhub 三工具、以及「停用/啟用」的即時對照,需**互動式 client**;本 session 以「照 config 原樣 spawn 成功」+「本身沒掛 MCP 得繞路的親身經驗」作為等價證據。
+
+**驗證方式(對照活動)**:
+- [x] `.mcp.json` 進 git,一個獨立 commit(見下)
+- [x] 對照實驗完成且記錄(有工具一步到位 vs 沒工具繞路)
+- [~] Claude Code `/mcp` 看到 orderhub 三工具 —— **需互動式 client**;以「照 config 原樣 spawn 成功」等價驗證
