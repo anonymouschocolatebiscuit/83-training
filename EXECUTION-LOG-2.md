@@ -220,7 +220,7 @@
 
 ---
 
-## 練習 5 — MCP 不是只有 tools:Resources 與 Prompts　✅（commit 待填）
+## 練習 5 — MCP 不是只有 tools:Resources 與 Prompts　✅（commit 0ca6d58）
 
 **① Asked**:各做一個 Resource(server 提供的唯讀資料,由 client 決定何時放進 context)與 Prompt(預定義提示範本,像 slash command),體會它們和 Tool 的分工。
 
@@ -251,3 +251,24 @@
 - [x] Inspector:Resources 讀得到 `orderhub://discount-rules`;Prompts 能帶 `threshold` 取得展開訊息
 - [~] Claude Code `@` 選 resource / 一鍵 slash command —— **需互動式 client**;以 Inspector 等價驗證
 - [x] PROCESS.md 記錄 5c 思考(見 PROCESS.md 更新);獨立 commit
+
+---
+
+## 最終總結（活動 2）
+
+| 練習 | commit | 內容 | 驗證 |
+| --- | --- | --- | --- |
+| 基線+0 | 3299f8e | EXECUTION-LOG-2、基線、Playwright MCP 體驗 | build 0/0、test 34 綠、SQL Server 就緒 |
+| 1 | f508621 | OrderHub.Mcp server（3 唯讀工具，stdio）| JSON-RPC 實測 tools/list + 3 工具全過 |
+| 2 | 24e1836 | 官方 Inspector CLI 除錯 | schema/required 正確、low_stock 對照網頁、壞 Id 清楚訊息 |
+| 3 | e521448 | `.mcp.json` 註冊 + before/after | 照 config 原樣 spawn 可用；有工具 vs 沒工具對照 |
+| 4 | a5e9b08 | 破壞性 cancel_order + ReadOnly 標註 | annotations 正確；cancel(1) SKU-1032 4→5；拒絕訊息清楚；test 34 綠 |
+| 5 | 0ca6d58 | Resource（discount-rules）+ Prompt（low_stock_report）| resources/prompts list/read/get 全過 |
+
+- **交付**：新專案 `src/OrderHub.Mcp`（stdio MCP server）：4 個工具（3 唯讀 + 1 破壞性）、1 個 resource、1 個 prompt；`training-repo/.mcp.json` 全隊共用。
+- **建置/測試**：`dotnet build` 0/0；`dotnet test` 全程維持 **34 綠**（Mcp 專案不影響既有測試）。
+- **驗證方式**：每個練習「計畫子代理（對抗式）+ 實作子代理（review）」雙重驗證；工具/資源/提示以**官方 MCP Inspector（`--cli`）+ 自寫 JSON-RPC client** 實跑（取代無法在自動化 session 進行的 GUI/互動式步驟，已逐處誠實標註）。
+- **兩次跨子代理校正**：練習 1 review 誤報 using 未使用（實為必要）、練習 5 review 誤報工具名（實測 `tools/list` 為 snake_case `low_stock`）——皆以程式碼/協定實測為最終裁判。
+- **只做本地 commit，未 push**（依指示；remote 為原始 repo）。
+- **資料副作用**：練習 4 取消了訂單 1、回補了 SKU-1032/1044/1009 庫存；可用 README 重置指令還原種子資料。
+- 心得與「對這個訓練的看法」記於 [`documents/PROCESS.md`](documents/PROCESS.md)（第二階段）。
