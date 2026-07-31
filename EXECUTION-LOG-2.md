@@ -80,3 +80,49 @@
 - [x] Playwright MCP 設定片段備妥(Claude Code / Codex 兩版)
 - [x] 環境可取得該 server、網站可被操作
 - [~] agent 自行開瀏覽器建單並回傳截圖 —— **需互動式 client**,不在本自動化 session 範圍
+
+---
+
+## 練習 1 — 建立 OrderHub MCP Server(stdio)　✅（commit 待填）
+
+**① Asked**:建一個 C# console 專案,透過 stdio 對外提供 3 個唯讀工具(get_order / low_stock / customer_orders),照專案分層注入 service / repository,金額重用 `IOrderService`,不重複折扣規則。
+
+**② Done**:
+
+*計畫(先計畫再動手)*:`src/OrderHub.Mcp` console 專案 → 加入 sln → 加 `ModelContextProtocol` + `Microsoft.Extensions.Hosting` 套件 → 參照 Core/Infrastructure → Program.cs(log 走 stderr、`AddDbContext` 用 `Default` 連線字串 + fallback、DI 接 repo/service、`AddMcpServer().WithStdioServerTransport().WithTools<OrderHubTools>()`)→ `OrderHubTools.cs` 三個工具投影成匿名物件。
+
+*計畫驗證子代理(唯讀、對抗式)結論*:逐條比對程式碼後**全 CONFIRMED**,並抓出/提醒:
+- `IOrderService` 在 `OrderHub.Core.Services` 命名空間、repo 介面在 `OrderHub.Core.Interfaces`——**兩個 using 都要**(已照做)。
+- `GetOrderAsync` → `GetWithDetailsAsync` 有 `Include(Customer).Include(Items).ThenInclude(Product)`(`OrderRepository.cs:45-50`),投影不會 NRE。
+- Core/Infrastructure 為 `net8.0`、EF Core SqlServer `8.0.11` 會**透過 Infrastructure 傳遞**,新專案不必自己加 EF 套件;建議 Mcp 也用 `net8.0` 對齊(已照做,見下)。
+- 匿名投影已切斷 Order↔Customer↔Items 循環參照,序列化安全。
+- 三個地雷:stdout 要乾淨(log→stderr)、DbContext 是 Scoped(工具解析要 per-call scope)、外部 NuGet API 需實測。
+
+*實作與計畫的差異(照實記)*:
+1. `dotnet new console` 在本機(有 SDK 10）預設吐出 **net10.0** 且抓到 **ModelContextProtocol 2.0.0**(活動寫 `--prerelease`,但 2.0.0 已是**正式版**)。我把 TargetFramework 改回 **net8.0**、`Microsoft.Extensions.Hosting` 釘 **8.0.1**,與全 solution 的 .NET 8 / EF 8.0.11 對齊(採納計畫驗證子代理建議)。
+2. 首次 build 失敗:`GetConnectionString` 找不到多載(CS1501)——漏了 `using Microsoft.Extensions.Configuration;`(活動範本原本就有,我謄漏)。補上後 build 成功。
+3. 三個工具、Program.cs 其餘均照活動範本;log 走 stderr;工具名由 SDK 自動轉 snake_case。
+
+**③ Result**:
+
+- `dotnet build src/OrderHub.Mcp` → **0 警告 / 0 錯誤**。
+- **執行期實測(關鍵:編譯過 ≠ 能跑)**:寫了一支 Node 的 MCP stdio JSON-RPC client,直接對「已編譯的 DLL」(不用 `dotnet run`,避免 build 訊息污染 stdout)跑 `initialize → tools/list → tools/call`:
+  - `initialize` 回 serverInfo `OrderHub.Mcp`。
+  - `tools/list` 列出 **3 個工具**,name 為 `get_order` / `low_stock` / `customer_orders`,description 與參數說明如所寫,`low_stock` 的 `threshold` 帶 `default:10`。
+  - `low_stock(threshold=10)` → 5 筆,與基線 `/Products/LowStock` **完全一致**:SKU-1048(2)、1005(3)、1023(3)、1014(4)、1032(4),依庫存升冪。(庫存並列 4 的 1014/1032 次序與網頁互換——因僅以 StockQuantity 排序,並列者次序不保證;集合與數量相同。)
+  - `low_stock(threshold=3)` → 1 筆(SKU-1048,庫存2)✓。
+  - `get_order(1)` → 完整明細,Subtotal/Total 由 `IOrderService` 算出(Standard 客戶 DiscountRate=0,Total=Subtotal=12660)✓。
+  - `get_order(999999)` → `找不到訂單 999999`(**清楚訊息,非 exception dump**)✓。
+  - `customer_orders(1)` → 該客戶 16 筆訂單摘要 ✓。
+  - 連續多次工具呼叫都正常 → 驗證了計畫子代理擔心的「Scoped DbContext 被工具捕獲」問題:SDK 對每次呼叫建立獨立 scope,無「second operation on this context」錯誤。
+- **實作驗證子代理(唯讀 code review)結論:Ship**。無 Critical/Major。列出的:
+  - *Minor* — `LowStock` 用 `GetActiveAsync()` + 記憶體過濾,而 repo 已有 `GetActiveBelowStockAsync(threshold)`(DB 端過濾)。**我的取捨**:此練習照活動範本原文(範本即用 `GetActiveAsync`),不擅自偏離讓學員對不上文件;把此更佳做法記於此(結果等價,差在把過濾/排序下推到 SQL、且更貼合活動自己「重用既有方法」的精神)。
+  - *Nit* — 該子代理另指「`using OrderHub.Core.Services;` 未使用」,**此點有誤**:`IOrderService` 正是在 `OrderHub.Core.Services`,此 using 為必要(計畫子代理已確認命名空間)。保留不動。跨代理互相校正,正是雙重驗證的價值。
+  - *Nit* — 工具類別無 namespace(全域)——沿用活動範本,保留。
+
+**驗證方式(對照活動)**:
+- [x] `dotnet build src/OrderHub.Mcp` 成功
+- [x] 三個工具皆可列出、可呼叫,description/參數如所寫
+- [x] `low_stock` 結果與 `/Products` 低庫存一致
+- [x] `get_order` 用不存在 Id → 清楚錯誤訊息
+- [x] 一個獨立 commit(見下)
