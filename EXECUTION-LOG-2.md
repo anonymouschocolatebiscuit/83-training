@@ -185,7 +185,7 @@
 
 ---
 
-## 練習 4 — 會改資料的工具:cancel_order　✅（commit 待填）
+## 練習 4 — 會改資料的工具:cancel_order　✅（commit a5e9b08）
 
 **① Asked**:前三個工具都是唯讀;這題給一個**會改資料庫**的 `cancel_order`,體會授權與人工確認變成設計的一部分。工具只做轉接(規則在 `OrderService.CancelOrderAsync`),並回頭把三個唯讀工具補上 `ReadOnly` 標註。
 
@@ -217,3 +217,37 @@
 - [x] 取消一筆待處理訂單成功,庫存有回補(SKU-1032 4→5)
 - [x] 再取消同一筆 / 取消已出貨訂單 → 清楚拒絕訊息而非 exception dump
 - [x] 獨立 commit;EXECUTION-LOG-2 記錄
+
+---
+
+## 練習 5 — MCP 不是只有 tools:Resources 與 Prompts　✅（commit 待填）
+
+**① Asked**:各做一個 Resource(server 提供的唯讀資料,由 client 決定何時放進 context)與 Prompt(預定義提示範本,像 slash command),體會它們和 Tool 的分工。
+
+**② Done**:
+
+*計畫驗證(先確認 2.0.0 API)*:查 `ModelContextProtocol.Core 2.0.0` XML doc,確認 `McpServerResourceType` / `McpServerResourceAttribute`(有 `UriTemplate`/`Name`/`MimeType`)、`McpServerPromptType` / `McpServerPromptAttribute`(有 `Name`)、以及主套件的 `WithResources` / `WithPrompts` 皆存在;`Microsoft.Extensions.AI.Abstractions 10.8.3`(提供 `ChatMessage`/`ChatRole`)已透過相依傳遞。範本在 2.0.0 適用,才動手。
+
+*實作*:
+- `OrderHubResources.cs` — `discount-rules` resource(`orderhub://discount-rules`,text/markdown,會員折扣規則)。
+- `OrderHubPrompts.cs` — `low_stock_report` prompt(帶 `threshold` 參數,預設 10;內容引導 agent 用 `low_stock` 工具再產採購建議表)。
+- `Program.cs` 接 `.WithResources<OrderHubResources>().WithPrompts<OrderHubPrompts>()`。`dotnet build` → 0/0。
+
+**③ Result**(官方 Inspector CLI 實跑):
+- `resources/list` → `會員折扣規則`(uri `orderhub://discount-rules`,mimeType text/markdown)✓
+- `resources/read orderhub://discount-rules` → 回完整 markdown(Standard 不打折 / Silver 95折 / Gold 9折)✓
+- `prompts/list` → `low_stock_report`,參數 `threshold`(required:false)✓
+- `prompts/get low_stock_report threshold=5` → 展開成 User 訊息,`threshold=5` 已代入,且**內容叫 agent 去用 `low_stock` 工具**(prompt 引導 tool,兩原語合體)✓
+
+*實作 review 子代理結論:SHIP*。分工分類正確(discount-rules 當 Resource、low_stock_report 當 Prompt)、註冊正確(三者鏈在同一 builder)、static 用得恰當。兩個 follow-up:
+- *MEDIUM(設計)*:折扣率**硬寫在 resource 字串**,與 `OrderService.GetDiscountRate`(`OrderService.cs:143-145`:Gold 0.10、Silver 0.05、Standard 0)是**兩份真相**。子代理逐條比對確認**今天數值相符**,但程式改版會 drift。**我的取捨**:照活動範本用靜態字串;活動自己的地雷區也點名此事並說「resource 也可以動態組出內容」——列為改進項(可從 `GetDiscountRate` 動態組出,單一真相)。
+- *子代理另一發現被我以實測反駁(交叉校正)*:子代理說「SDK 用方法名原樣 `LowStock`,prompt 寫 `low_stock` 是錯的」。**但 `tools/list` 實測顯示註冊名就是 snake_case `low_stock`**(練習 2/4 的輸出、活動也明載「LowStock → low_stock」)。故 prompt 的 `low_stock` 參照**正確**;此發現不成立。
+
+**5c 思考題(記入 PROCESS.md)**:折扣規則用 Resource 給 vs 讓 agent 自己讀 `OrderService.cs`——差在**團隊共用、版本控制、規則改版只改一處**(且 agent 不必有讀原始碼的能力/權限就能拿到「權威背景知識」)。prompt 範本放 server vs 每人自己打一段——差在**一致性與可維護**:採購同事每週那句話統一版本,改流程改一次全隊生效,不會每人一個版本。
+
+*誠實標註*:Claude Code 裡用 `@` 選 resource、`/mcp__orderhub__low_stock_report` 當 slash command 執行,需**互動式 client**;Codex CLI 目前只接 MCP 的 **tools**(resources/prompts 無 `@`/slash 介面)。故本 session 以官方 Inspector 驗證這兩個原語(正是活動對 Codex 用戶建議的路徑)。
+
+**驗證方式(對照活動)**:
+- [x] Inspector:Resources 讀得到 `orderhub://discount-rules`;Prompts 能帶 `threshold` 取得展開訊息
+- [~] Claude Code `@` 選 resource / 一鍵 slash command —— **需互動式 client**;以 Inspector 等價驗證
+- [x] PROCESS.md 記錄 5c 思考(見 PROCESS.md 更新);獨立 commit
