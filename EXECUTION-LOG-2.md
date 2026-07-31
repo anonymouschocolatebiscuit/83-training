@@ -83,7 +83,7 @@
 
 ---
 
-## 練習 1 — 建立 OrderHub MCP Server(stdio)　✅（commit 待填）
+## 練習 1 — 建立 OrderHub MCP Server(stdio)　✅（commit f508621）
 
 **① Asked**:建一個 C# console 專案,透過 stdio 對外提供 3 個唯讀工具(get_order / low_stock / customer_orders),照專案分層注入 service / repository,金額重用 `IOrderService`,不重複折扣規則。
 
