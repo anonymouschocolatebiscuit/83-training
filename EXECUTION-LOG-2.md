@@ -155,7 +155,7 @@
 
 ---
 
-## 練習 3 — 註冊給 agent,做 before/after 對照　✅（commit 待填）
+## 練習 3 — 註冊給 agent,做 before/after 對照　✅（commit e521448）
 
 **① Asked**:把 server 接進 CLI(`training-repo/.mcp.json`,進 git 全隊共用),親眼看「有工具 vs 沒工具」的差異;問「哪些商品庫存低於 5?」對照 MCP 關 / 開。
 
@@ -182,3 +182,38 @@
 - [x] `.mcp.json` 進 git,一個獨立 commit(見下)
 - [x] 對照實驗完成且記錄(有工具一步到位 vs 沒工具繞路)
 - [~] Claude Code `/mcp` 看到 orderhub 三工具 —— **需互動式 client**;以「照 config 原樣 spawn 成功」等價驗證
+
+---
+
+## 練習 4 — 會改資料的工具:cancel_order　✅（commit 待填）
+
+**① Asked**:前三個工具都是唯讀;這題給一個**會改資料庫**的 `cancel_order`,體會授權與人工確認變成設計的一部分。工具只做轉接(規則在 `OrderService.CancelOrderAsync`),並回頭把三個唯讀工具補上 `ReadOnly` 標註。
+
+**② Done**:
+
+*計畫驗證(先確認外部 API 再動手,呼應計畫子代理提醒的「NuGet API churn」)*:活動範本用 `[McpServerTool(Destructive = true, Idempotent = false)]` 與 `(ReadOnly = true)`。我先查 `ModelContextProtocol.Core 2.0.0` 的 XML doc,確認 `McpServerToolAttribute` **確實有** `Destructive` / `Idempotent` / `ReadOnly` / `Name` / `Title` / `OpenWorld` 等屬性——範本在 2.0.0 仍適用,才動手。並讀 `OrderService.CancelOrderAsync`(`OrderService.cs:117-138`)確認:null→Fail「找不到指定的訂單」、非 Pending/Confirmed→Fail「狀態為 X 的訂單不可取消」、否則**先回補庫存再設 Cancelled**(即活動 1 客訴 3 修好的行為)。工具只需轉接 `result.Success ? 成功訊息 : 取消失敗:{ErrorMessage}`。
+
+*實作*:`OrderHubTools.cs` 加 `CancelOrder` 工具(`Destructive=true, Idempotent=false`);三個唯讀工具加 `ReadOnly=true`。`dotnet build` → 0/0。
+
+**③ Result**(以官方 Inspector CLI 實跑,DB 為真實 SQL Server):
+
+- **標註正確**(`tools/list` 的 annotations):`get_order` / `low_stock` / `customer_orders` → `{"readOnlyHint":true}`;`cancel_order` → `{"destructiveHint":true,"idempotentHint":false}`。印證活動的「標註預設會反咬」:唯讀工具不標 ReadOnly 就會被當成可能破壞性。
+- **破壞性 + 庫存回補(end-to-end)**:
+  - 前:`get_order(1)` = Pending,含 SKU-1032 數量 1;`low_stock(10)` 顯示 SKU-1032 庫存 **4**。
+  - `cancel_order(1)` → `訂單 1 已取消,庫存已回補`。
+  - 後:`get_order(1)` = **Cancelled**;`low_stock(10)` 顯示 SKU-1032 庫存 **5**(4+1,透過工具本身就看到庫存被回補)。
+- **清楚的拒絕訊息(非 exception dump)**:
+  - 對同一筆再取消:`取消失敗:狀態為 Cancelled 的訂單不可取消`。
+  - 取消一筆已出貨訂單(id=129,Shipped):`取消失敗:狀態為 Shipped 的訂單不可取消`。
+- **回歸**:`dotnet test` 仍 **34 綠**(改動只在 Mcp 專案,未影響 Core/Infra/Tests)。
+- **實作 review 子代理**結論:**SHIP**。逐條確認:thin pass-through(不重複規則)、標註預設已正確覆寫、真正的狀態守衛在 service 層(標註只是 hint)、失敗回可讀訊息無 stack trace、缺 id 不丟例外而回 Fail。僅一個 cosmetic nit(成功訊息對「零品項訂單」也寫「庫存已回補」)。
+
+*誠實標註*:活動要求「對 agent 說取消訂單 X,觀察**權限確認提示**,按允許前資料不會被動到」——那個確認 UI 是 **client 端**依 `destructiveHint` 決定的行為(Claude Code 會參考、Codex 由 `approval_policy` 管)。我已驗證 server **有正確送出 `destructiveHint`**(這是觸發確認的依據);確認提示本身需互動式 client。
+*資料副作用*:本練習確實改了訓練 DB(取消了訂單 1、SKU-1032/1044/1009 庫存回補)。可用 README 的重置指令還原種子資料。
+
+**驗證方式(對照活動)**:
+- [x] Inspector 中 `cancel_order` annotations 為 destructiveHint,三唯讀工具為 read-only
+- [~] 對 agent 說「取消訂單 X」觀察**權限確認提示** —— server 已送 destructiveHint;確認 UI 需互動式 client
+- [x] 取消一筆待處理訂單成功,庫存有回補(SKU-1032 4→5)
+- [x] 再取消同一筆 / 取消已出貨訂單 → 清楚拒絕訊息而非 exception dump
+- [x] 獨立 commit;EXECUTION-LOG-2 記錄
