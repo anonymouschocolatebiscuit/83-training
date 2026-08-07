@@ -164,7 +164,7 @@
 
 ---
 
-## 步驟 5 — 對真實 Gemini 的 live 煙霧測試　✅（commit 待填）
+## 步驟 5 — 對真實 Gemini 的 live 煙霧測試　✅（commit ed3b8ee）
 
 **① Asked**（活動 §1c 的驗證方式，需真實金鑰）：跑起網站,對 `POST /api/orders/search` 打真實請求:正常查得出結果、刪除意圖→422、無關輸入→拒、拔 key→503。
 
