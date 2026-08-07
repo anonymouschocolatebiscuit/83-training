@@ -42,3 +42,35 @@
    ```json
    "deny": [ …, "Read(**/UserSecrets/**)" ]
    ```
+
+---
+
+## 練習 1a — Core:白名單參數、介面與 service　✅（commit 待填）
+
+**① Asked**：Core 放 `OrderSearchQuery`（白名單參數）、`IOrderQueryTranslator`、`AiServiceUnavailableException`、`IOrderSearchService`/`OrderSearchService`，並在 `IOrderRepository` 加 `SearchAsync`。第二道防線在 service：**沒有任何有效條件的查詢一律拒絕**。
+
+**② Done**：
+
+*結構調整（照實記）*：活動把 `IOrderRepository.SearchAsync` 的**介面**放 1a、**實作**放 1b。為了讓**每個 commit 都建置得過**（介面加了方法卻沒實作會讓 `OrderRepository` 不滿足介面而 build 失敗），我把介面 + `OrderRepository` 實作**一起**放進本步。
+
+*計畫驗證子代理（唯讀、對抗式）結論*：**全 CONFIRMED**，並提醒三點（已照做）：
+- repo 的 Tier 過濾要 null-guard `o.Customer != null && o.Customer.Tier == ...`（活動範本本就有）。
+- `IOrderRepository.cs` 要 `using OrderHub.Core.Ai;`；`OrderSearchService.cs` 要四個 Core using。
+- 確認 `OrderRepository` 是 `IOrderRepository` 的**唯一實作**（tests 無 fake），故加方法不會弄壞既有 34 測試；Core 無 Infrastructure 相依（方向正確）。
+
+*實作*（照活動原文）：六個檔案 —
+- `Core/Ai/OrderSearchQuery.cs`（4 個 nullable 參數 + `HasAnyFilter`）
+- `Core/Ai/IOrderQueryTranslator.cs`（回 `OrderSearchQuery?`，null = 無法理解）
+- `Core/Ai/AiServiceUnavailableException.cs`
+- `Core/Services/IOrderSearchService.cs` / `OrderSearchService.cs`（空查詢拒、翻譯 null 或無 filter 拒、DateFrom>DateTo 拒 → 再交 repo）
+- `Core/Interfaces/IOrderRepository.cs`（+ `SearchAsync`）、`Infrastructure/Repositories/OrderRepository.cs`（+ 實作：條件式過濾、含當日、`Take(100)` 上限、`Include(Customer/Items)`）
+
+**③ Result**：
+
+- `dotnet build` → **0/0**；`dotnet test` → **34 綠**（沒動到既有行為）。
+- **實作 review 子代理結論：SHIP**，無 Critical/Major。逐點確認：白名單雙防線正確、分層乾淨（Core 不依賴 Infra、只有 repo 碰 DbContext、service 回 `ServiceResult`）、repo 查詢有界（`Take(100)`、無 N+1、日期含當日、Customer null-guard）。僅資訊性提醒：CancellationToken 未傳進 repo（與既有 repo 慣例一致，非退步）；`AiServiceUnavailableException` 目前未用（step 2 翻譯器會擲、step 3 Web 層轉 503）。
+
+**驗證方式（對照活動 §1a）**：
+- [x] Core 三檔 + service + 介面就位，build 綠
+- [x] 「沒有任何有效條件」的查詢會被 service 擋下（`!HasAnyFilter` → Fail）
+- [x] 分層：SQL 由 EF Core 生成、模型碰不到查詢語句（repo 吃強型別 `OrderSearchQuery`）
