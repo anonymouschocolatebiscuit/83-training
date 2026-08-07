@@ -45,7 +45,7 @@
 
 ---
 
-## 練習 1a — Core:白名單參數、介面與 service　✅（commit 待填）
+## 練習 1a — Core:白名單參數、介面與 service　✅（commit 649a99e）
 
 **① Asked**：Core 放 `OrderSearchQuery`（白名單參數）、`IOrderQueryTranslator`、`AiServiceUnavailableException`、`IOrderSearchService`/`OrderSearchService`，並在 `IOrderRepository` 加 `SearchAsync`。第二道防線在 service：**沒有任何有效條件的查詢一律拒絕**。
 
@@ -74,3 +74,34 @@
 - [x] Core 三檔 + service + 介面就位，build 綠
 - [x] 「沒有任何有效條件」的查詢會被 service 擋下（`!HasAnyFilter` → Fail）
 - [x] 分層：SQL 由 EF Core 生成、模型碰不到查詢語句（repo 吃強型別 `OrderSearchQuery`）
+
+---
+
+## 練習 1b — Infrastructure：Gemini client 與翻譯器　✅（commit 待填）
+
+**① Asked**：`Gemini/` 放 `GeminiOptions`、`IGeminiJsonClient`、Gemini client、`GeminiOrderQueryTranslator`。翻譯器**把模型輸出當不可信輸入**（反序列化 → DataAnnotations 驗證 → 白名單映射，任一步失敗回 null）。
+
+**② Done**：
+
+*計畫驗證子代理結論*：**全 CONFIRMED**，且明確確認：
+- **不需要新增任何 NuGet**——`IOptions`/`ILogger`(Microsoft.Extensions.* 8.0.2)、`HttpClient`、`System.Text.Json`、`DataAnnotations` 的 `Validator`/`Required`/`AllowedValues`(net8.0 內建) 全都透過 EF Core 8.0.11 相依或 net8.0 targeting pack 提供。**未觸發 CLAUDE.md「不要未經同意加套件」**。
+- 提醒：`[Required]` 只放 `Intent`；`Status`/`MemberTier` 要 optional 且 `[AllowedValues]` 含 `null,""`（否則模型省略欄位會被誤判失敗）。已照活動原文。
+
+*實作*：
+- `GeminiOptions.cs`：`ApiKey`(string?)、`Model`(預設 `gemini-2.0-flash`，可設定)、`Endpoint`(**基底** URL)、`MaxRetries`。
+- `IGeminiJsonClient.cs`：`GenerateJsonAsync(input, responseSchemaJson, ct)`。
+- `GeminiGenerateContentClient.cs`：**對齊真實 `…/v1beta/models/{model}:generateContent`**——body `contents/parts` + `generationConfig.responseSchema`（嵌入 parsed `JsonElement`，不重複編碼）、header `x-goog-api-key`、回應取 `candidates[0].content.parts[0].text`。重試：401/403 直接擲、429 尊重 `retryDelay` 再指數退避、5xx/網路錯誤退避重試、耗盡擲 `AiServiceUnavailableException`（→ Web 回 503）。
+- `GeminiOrderQueryTranslator.cs`：**安全管線照活動原文**——prompt 內含今天日期、structured output、`Deserialize` 到私有 `RawQuery` → `Validator.TryValidateObject(validateAllProperties:true)` **先驗證再** `Enum.TryParse`/`TryParseExact` 映射（呼應地雷區：`TryParse` 單獨會吃 `"99"`，所以 `[AllowedValues]` 要先擋）、只有 `intent=="search"` 才放行、`JsonException` catch 回 null。`ResponseSchema` 改用 Gemini 大寫 `Type`(OBJECT/STRING)。
+
+**③ Result**：
+
+- `dotnet build` → **0/0**；**無新增 NuGet**。
+- **實作 review 子代理結論：SHIP**。安全核心、真實 API 適配、分層、資源釋放（所有 `HttpResponseMessage`/`JsonDocument` 皆在 `using`）、重試邊界（0..MaxRetries 有界、無無窮迴圈）皆正確。
+- **依 review 採納一個 MEDIUM 修正**（直接服務活動「絕不變 500」紅線）：HttpClient **逾時**會擲 `TaskCanceledException`（非 `HttpRequestException`），原本會漏接變成 500。已加 `catch (OperationCanceledException) when (!ct.IsCancellationRequested)` → 當可重試暫時失敗、耗盡回 503；真正的呼叫端取消仍往外傳。另採納 trivial 修正：`retryDelay` 解析改用 `InvariantCulture`。
+- **保留活動原文、僅記錄的 LOW**：空字串欄位以 `is not null` 判斷（schema enum 不含 `""`，模型不會吐）；非 429 的 4xx 也會重試（活動範本亦如此）。
+
+**驗證方式（對照活動 §1b）**：
+- [x] 傳輸（client、retry/backoff）與翻譯（prompt、structured output、不可信輸出處理）拆分為兩類別
+- [x] 反序列化 → 驗證 → 白名單映射，任一步失敗回 null；`intent != "search"` 回 null
+- [x] 金鑰未設定 / 重試耗盡 → `AiServiceUnavailableException`（step 3 Web 轉 503）
+- [~] 對真實 Gemini 的 structured output 實際回應形狀 —— **step 5 live 煙霧測試驗證**（需 user key）
