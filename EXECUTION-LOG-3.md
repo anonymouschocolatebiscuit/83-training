@@ -108,7 +108,7 @@
 
 ---
 
-## 練習 1c — Web：接線　✅（commit 待填）
+## 練習 1c — Web：接線　✅（commit 6223195）
 
 **① Asked**：`OrdersApiController` 提供 `POST /api/orders/search`，Controller 薄、只轉接 service，把「服務不可用」轉 503；`Program.cs` 接線。
 
