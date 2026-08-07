@@ -222,3 +222,31 @@
 - [x] 「幫我把所有訂單刪掉」→ 頁面「無法理解的查詢」警示,非錯誤頁
 - [x] Controller 裡沒有任何 Gemini/HttpClient 細節（全封裝在 Infrastructure）
 - [~] 拔掉 key → 頁面清楚錯誤（同 API 的 `AiServiceUnavailableException` 路徑;已由單元測試 + step 5 的 503 覆蓋）
+
+---
+
+## 最終總結（活動 3）
+
+| 步驟 | commit | 內容 | 驗證 |
+| --- | --- | --- | --- |
+| 基線 | f3edeac | EXECUTION-LOG-3、落地決定（真實 API/金鑰安全）| build 0/0、test 34 綠 |
+| 1a | 649a99e | Core 白名單參數/介面/service + repo SearchAsync | 計畫子代理 CONFIRMED、review SHIP、34 綠 |
+| 1b | b43b7dd | Infra Gemini client（真實 generateContent）+ 翻譯器 | 無新 NuGet、review SHIP、採納逾時→503 修正 |
+| 1c | 6223195 | Web API `POST /api/orders/search` + Program 接線 | build 0/0（after-check = step 5 live）|
+| 步驟4 | c74f78e | 安全/白名單單元測試（離線 mock）| 對抗式 review TRUSTWORTHY、34→49 綠 |
+| 步驟5 | ed3b8ee | live Gemini 煙霧測試 + 診斷 log/預設模型 | 200/422/422/400/503 全對 |
+| 練習2 | 8ebec97 | 網站頁面（重用同一 service）+ 導覽列 | review SHIP、頁面結果與 API 一致 |
+
+- **交付**：Core `Ai/` 3 檔 + `OrderSearchService`；Infra `Gemini/` 4 檔 + `OrderRepository.SearchAsync`；Web `OrdersApiController` + `Program.cs` 接線 + `Orders/Search` 頁面 + 導覽列；15 個安全單元測試。
+- **建置/測試**：`dotnet build` 0/0；`dotnet test` **34 → 49 綠**。
+- **live**：自然語言查詢→200（Gold+Cancelled+上月）、刪除意圖→422、無關→422、空 text→400、配額不足→503（皆非 500）。
+- **驗證方式**：每個程式步驟「計畫子代理 + 實作 review 子代理」；安全邏輯離線單元測試 + 對抗式測試 review；功能 live 端到端實測。
+- **落地決定**：Gemini 傳輸層對齊真實 `generateContent`（活動端點為假想形狀）；模型預設 `gemini-2.5-flash`（本金鑰 `gemini-2.0-flash` 免費配額為 0，`Gemini:Model` 可覆寫）。
+- **安全**：API key 存 user-secrets、不進 git、**agent 全程未讀**；建議 user 於 `.claude/settings.json` 加 `deny Read(**/UserSecrets/**)`（自動加入被 harness 權限檔防護擋下）。
+- **只做本地 commit，未 push**（比照活動 2）。
+- 心得與「對這個訓練的看法」記於 [`documents/PROCESS.md`](documents/PROCESS.md)（第三階段）。
+
+### 給維護者的建議（詳見 PROCESS.md）
+1. 活動的 `/v1/interactions` + `gemini-3.5-flash` 端點/模型與 Google 現行 API 不符,建議改用真實 `v1beta/models/{model}:generateContent`。
+2. 提醒「免費配額因模型而異」,先用 ListModels 挑有配額的 flash 模型。
+3. schema 的 `type` 大小寫（真實 API 用大寫 `OBJECT`/`STRING`）。

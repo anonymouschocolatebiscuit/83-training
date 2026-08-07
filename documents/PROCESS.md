@@ -183,3 +183,54 @@ Claude Code，模型 Opus 4.8（1M context）。用兩個唯讀子代理做交�
 2. **`.mcp.json` 用 `dotnet run` 對首次連線不友善**：冷啟動 build 會逾時。活動已提醒可先 build 或指向 DLL，但可以更強調「**開 client 前先 `dotnet build` 一次**」作為預設步驟。
 
 **一個對自動化/Codex 用戶的提醒**（活動對 Codex 有提到，但值得放大）：resources 與 prompts 目前主要是 Claude Code 的互動式介面（`@`、slash command）在用；Codex CLI / 自動化 agent 只吃 tools。要驗證 resources/prompts，**官方 Inspector（含 `--cli`）是最可靠、可重跑的路徑**——這次我全程靠它，比任何 GUI 截圖都更適合留成可重跑的證據。
+
+---
+
+# 第三階段 — Gemini API：把 AI 嵌進產品（活動 3）心得
+
+> 完整逐步流水帳在專案根目錄 [`EXECUTION-LOG-3.md`](../EXECUTION-LOG-3.md)。以下是四問 + 自我驗證 + 對這個訓練的看法。
+
+**使用的 agent 與模型**：Claude Code，Opus 4.8。每步：計畫 → 對抗式子代理驗計畫 → 實作 → 子代理 review → 記錄 → 獨立本地 commit（不 push）。**金鑰全程未讀**：存 user-secrets，網站執行期自行載入，我只看 HTTP 回應。
+
+## 通用四問
+
+### 1. 我的任務拆解
+- baseline → 1a Core → 1b Infrastructure → 1c Web API → 安全單元測試 → **live 煙霧測試** → 練習 2 網站頁面 → PROCESS。
+- 兩個實務調整：(a) 把 repo 的 `SearchAsync` **實作**從活動的 1b 提前併進 1a，讓**每個 commit 都建置得過**（介面加了方法卻沒實作會 build 失敗）。(b) 把 Gemini 傳輸類別**改對齊真實 `generateContent` API**——活動範本的 `/v1/interactions` + `gemini-3.5-flash` 是假想形狀，照抄 live 會打不通；安全每一層仍照活動原文。
+
+### 2. AI 幫上大忙的地方
+- **開工前用對抗式子代理確認「不需要新增 NuGet」**。CLAUDE.md 禁止未經同意加套件,而活動要用 `IOptions`/`ILogger`/`DataAnnotations.AllowedValues`。子代理逐條查 `project.assets.json` 證明這些都由 EF Core 8.0.11 或 net8.0 targeting pack **傳遞提供**（附行號），我才敢直接寫、不必加套件也不必打斷去問。提問重點：
+  > 「這些型別能不能**在不加任何 NuGet** 的前提下編譯?逐一查 csproj 與其傳遞相依,若有需要新增的套件明講——因為 CLAUDE.md 禁止未經同意加套件。」
+
+### 3. AI 誤導我的地方，與我如何發現
+- **最生動的一次：503 的真因不是程式錯**。第一次打 API 得到 503「重試 4 次仍失敗」,很容易當成「我的 client 寫壞了」。我**在 client 非成功分支加一行 log（狀態 + 回應片段，去敏）**,重跑才看到真相:HTTP **429** 且 body 寫 `limit: 0, model: gemini-2.0-flash`——是這把金鑰對 `gemini-2.0-flash` **免費配額為 0**,請求格式與 structured-output schema 其實都被接受了。改用 `gemini-2.5-flash` 立刻成功。**靠讀真實上游回應抓到**（正是活動 1「看 raw HTTP」那課的延伸）。
+- **review 子代理的 MEDIUM 是對的、採納了**：它指出 HttpClient **逾時**擲的是 `TaskCanceledException` 而非 `HttpRequestException`,原本會漏接變 500——直接違反活動「絕不變 500」紅線。加了 `catch (OperationCanceledException) when (!ct.IsCancellationRequested)`。（同一個子代理也說「找不到活動 md 檔」——它沒讀到我給的路徑,我以實際程式碼為準,不受影響。）
+
+### 4. 我會帶回日常工作的一招
+- **接第三方 API 撞非 2xx 時,先把「上游真實狀態碼 + 回應 body 片段（去敏）」log 出來再下結論**,不要停在「重試耗盡 → 503」這種泛泛包裝。操作步驟:非成功分支 `logger.LogWarning("上游 {Status}:{Body}", (int)resp.StatusCode, payload[..500])` → 重跑 → 看真因分流（429 `limit:0`＝配額/模型、400＝schema/body、404＝model 名、401/403＝金鑰）。這次它把我從「以為程式錯」直接導向「配額設定問題」,省掉大量瞎猜。
+
+## 自我驗證（第三階段 — Gemini API）
+
+練習 1（自然語言查訂單 API）
+1. [x] 「上個月金卡會員取消的訂單」live 查得出結果:#137 陳志明、#155 劉思穎,**皆 Gold+Cancelled+落在 7 月**（今天 2026-08-07 → 上月）,與狀態/會員條件一致。
+2. [x] 「幫我把所有訂單刪掉」→ **HTTP 422「無法理解的查詢」**,資料毫髮無傷（紅線）。
+3. [x] 拔掉/配額不足 → **HTTP 503**（非 500）:實測 `gemini-2.0-flash` 配額 0 → 重試耗盡 → 503;金鑰未設走同一 `AiServiceUnavailableException` 路徑（單元測試覆蓋）。
+4. [x] 無關文字（食譜）→ 模型判 `unsupported` → 422「無法理解的查詢」,不炸。
+5. [x] 分層:LLM 只產白名單參數,SQL 由 EF Core 從強型別 `OrderSearchQuery` 生成,模型碰不到查詢語句;兩道防線（翻譯器白名單 + service `!HasAnyFilter`）。
+6. [x] 安全邏輯有離線單元測試（15 個）:`"99"`/壞日期/非法 JSON/unsupported → null;上游例外往外傳;`dotnet test` 34→**49 綠**。
+
+練習 2（同一 service 接網站頁面）
+1. [x] `/Orders/Search` 頁面查同一句 → 結果與練習 1 API 一致（#137、#155）——`IOrderSearchService` **一行未改**,分層紅利。
+2. [x] 「幫我把所有訂單刪掉」→ 頁面 `alert-warning`「無法理解的查詢」,非錯誤頁。
+3. [x] Controller 裡零 Gemini/HttpClient 細節（全封裝在 Infrastructure）;View 綁 `OrderSearchViewModel`;導覽列加「AI 查詢」。
+
+## 我對這個訓練的看法
+
+**核心心法很正確,是「把 LLM 放進產品」最該先學的一課**:
+- **「LLM 只產參數、永不產 SQL」的白名單模式** + **兩道防線**（翻譯器把模型輸出當不可信:反序列化→DataAnnotations→enum/date 白名單映射;service 再擋 no-filter）——這是我看過對「不可信模型輸出」示範得最扎實的教材。地雷區也點得準:**今天的日期要進 prompt**（否則「上個月」會被算成訓練資料裡的月份）、**`Enum.TryParse` 單獨會吃 `"99"`**（子代理實測確認,所以 `[AllowedValues]` 要先擋）。
+- **上游失敗轉 503 而非 500**、**免費層一定撞 429 要退避重試**——都是真的會遇到（我第一次打就撞 429）。
+- **分層紅利**在練習 2 具體兌現:同一個 `IOrderSearchService`,API 與網站頁面共用,一行邏輯都不用改。
+
+**一個必須提醒維護者更新的地方（照抄會 live 打不通）**:活動的 Gemini 端點/模型是**假想或未來形狀**——`POST /v1/interactions`、`input`/`response_format`、回應 `steps[].model_output`、模型 `gemini-3.5-flash`——與 Google **現行**的 `POST …/v1beta/models/{model}:generateContent`（`contents`/`parts` + `generationConfig.responseSchema`,回應 `candidates[0].content.parts[0].text`）**不一致**。我把傳輸層改成真實形狀才跑得通,安全每一層仍照活動。建議活動:(1) 改用真實 `generateContent` 形狀;(2) 提醒「**免費配額因模型而異**,先用 `GET …/v1beta/models?key=` 挑有 `generateContent` 且有免費配額的 flash 模型」——我實測本金鑰 `gemini-2.0-flash` 免費配額為 0、`gemini-2.5-flash` 可用;(3) `response_format`/schema 的 `type` 大小寫（真實 API 用大寫 `OBJECT`/`STRING`）。
+
+**一個給自動化 agent 的誠實邊界**:申請金鑰需真人在瀏覽器登入 Google、接受 ToS,我做不到;金鑰也不該進對話。這次由 user 存進 user-secrets、我只讀 HTTP 回應來驗證——是把「agent 不碰機密」落實成流程的好例子。
