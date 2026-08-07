@@ -134,3 +134,30 @@
 - [x] `POST /api/orders/search` 路由與 controller 就位、build 綠
 - [x] Controller 裡沒有任何 Gemini/HttpClient 細節（全封裝在 Infrastructure）
 - [~] 「查得出結果 / 刪除→422 / 無關→unsupported / 拔 key→503」 —— **step 5 live 驗證**
+
+---
+
+## 步驟 4 — 安全/白名單邏輯單元測試（mock 掉 Gemini）　✅（commit 待填）
+
+**① Asked**（我對活動的補強，非活動明列步驟）：活動的「安全對待模型輸出」是重點，但活動的驗證全靠 live API。我加**離線、確定性**的單元測試,把活動的紅線變成可重跑的證明——不需要金鑰。
+
+**② Done**：
+
+*「開工前」驗證*（此步的 before 檢查）：直接對照活動的紅線清單設計測試案例——刪除意圖→拒、無關輸入→unsupported→拒、無 filter→拒、壞 enum/日期→拒、金鑰未設/上游掛→不可吞成 null。用**手刻 fake**（無新 NuGet）：`FakeGeminiClient : IGeminiJsonClient`、`FakeTranslator : IOrderQueryTranslator`,**只替換 HTTP 邊界與 service 的翻譯器,不替換受測的程式**。
+
+*實作*：兩個測試檔（15 個新測試）——
+- `GeminiOrderQueryTranslatorTests.cs`（7）：valid→映射、`intent:"unsupported"`→null（刪除紅線）、只有 intent 無欄位→非 null 空查詢（交 service 擋）、`status:"99"`→null（AllowedValues 先擋）、壞日期→null、非法 JSON→null（不炸）、上游 `AiServiceUnavailableException`→**往外傳不吞**。
+- `OrderSearchTests.cs`（8）：service 白名單（空查詢/翻譯 null/無 filter/日期反序→Fail、valid→Ok 且筆數正確）+ repo（status/tier 過濾、日期含當日且排除隔日、`Take(100)` 上限、由新到舊排序）。用真實 `OrderRepository` + InMemory DB。
+
+*「實作後」驗證*（after 檢查）：派**對抗式測試 review 子代理**專問「這些測試若把安全檢查移除/反轉,會不會失敗?有沒有假通過?」結論:**TRUSTWORTHY**,全部 mutation-killing、無 vacuous。子代理**實測確認** `Enum.TryParse<OrderStatus>("99")` 會回 `true`(值 99)——證明 `[AllowedValues]` 這道閘是**必要且有作用**的(不是多餘)。依其三點建議做了兩個 hardening:`EmptyQuery`/`DateFromAfterDateTo` 補上 `ErrorMessage` 斷言(確認是對的守衛觸發)、cap 測試改為**完整**由新到舊斷言(非只比頭尾)。
+
+**③ Result**：
+
+- `dotnet test` → **49 綠**（34 既有 + 15 新）/ 0 失敗。
+- 這 15 個測試把活動「安全對待模型輸出」的每條紅線,固化成不依賴金鑰、可重跑的回歸測試。
+
+**驗證方式**：
+- [x] 刪除意圖 / 無關輸入 → 拒（翻譯器 + service 兩層）
+- [x] 壞 enum(`"99"`)、壞日期、非法 JSON → 一律 null,不丟例外
+- [x] 上游不可用 → 例外往外傳（Web 轉 503），不被吞成「無法理解」
+- [x] repo 查詢:過濾、含當日、`Take(100)`、排序皆有測試
