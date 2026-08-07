@@ -194,7 +194,7 @@
 
 ---
 
-## 練習 2 — 同一個 service 接上網站頁面　✅（commit 待填）
+## 練習 2 — 同一個 service 接上網站頁面　✅（commit 8ebec97）
 
 **① Asked**：體會分層的紅利——練習 1 的 `IOrderSearchService` **一行都不用改**,再接一個 MVC 入口。`GET /Orders/Search?q=...`,Controller 薄、View 綁 ViewModel、錯誤走頁面顯示。
 
