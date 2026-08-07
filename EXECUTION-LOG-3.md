@@ -137,7 +137,7 @@
 
 ---
 
-## 步驟 4 — 安全/白名單邏輯單元測試（mock 掉 Gemini）　✅（commit 待填）
+## 步驟 4 — 安全/白名單邏輯單元測試（mock 掉 Gemini）　✅（commit c74f78e）
 
 **① Asked**（我對活動的補強，非活動明列步驟）：活動的「安全對待模型輸出」是重點，但活動的驗證全靠 live API。我加**離線、確定性**的單元測試,把活動的紅線變成可重跑的證明——不需要金鑰。
 
@@ -161,3 +161,33 @@
 - [x] 壞 enum(`"99"`)、壞日期、非法 JSON → 一律 null,不丟例外
 - [x] 上游不可用 → 例外往外傳（Web 轉 503），不被吞成「無法理解」
 - [x] repo 查詢:過濾、含當日、`Take(100)`、排序皆有測試
+
+---
+
+## 步驟 5 — 對真實 Gemini 的 live 煙霧測試　✅（commit 待填）
+
+**① Asked**（活動 §1c 的驗證方式，需真實金鑰）：跑起網站,對 `POST /api/orders/search` 打真實請求:正常查得出結果、刪除意圖→422、無關輸入→拒、拔 key→503。
+
+**② Done / ③ Result**（app 於 Development 跑在 :5150,金鑰由 user-secrets 載入,我全程未讀金鑰）：
+
+- **除錯過程(照實記,這是本步最有價值的部分)**:
+  - 第一次打 → **503「重試 4 次後仍失敗」**。因 401/403 會有不同訊息,判定金鑰**有**載入、是上游 4xx/5xx。
+  - 為診斷,在 client 非成功分支加一行**記錄上游狀態 + 回應片段(不含金鑰)** 的 log(順手的 observability 改善,保留)。重跑 → 看到真因是 **429**,且 body 寫 **`limit: 0, model: gemini-2.0-flash`**——這把金鑰對 **`gemini-2.0-flash` 免費配額為 0**(不是程式錯、不是 schema 錯:請求格式與 structured output schema 都被接受了)。
+  - 用 **`Gemini__Model` 環境變數覆寫**(不動程式、不碰金鑰)改成 **`gemini-2.5-flash`** → 成功。最後把 `GeminiOptions.Model` 程式碼**預設改為 `gemini-2.5-flash`**(仍可用 `Gemini:Model` 覆寫)。
+
+- **live 結果**:
+  - `{"text":"上個月金卡會員取消的訂單"}` → **HTTP 200**,回 2 筆:id 137(陳志明/Gold/Cancelled/2026-07-15)、id 155(劉思穎/Gold/Cancelled/2026-07-07)。**皆金卡、皆已取消、皆落在「上個月」(今天 2026-08-07 → 7 月)**——LLM 把中文轉成 `{status:Cancelled, memberTier:Gold, dateFrom/dateTo=7月}`,查詢仍走 EF Core。✓
+  - `{"text":"幫我把所有訂單刪掉"}` → **HTTP 422 「無法理解的查詢」**,資料毫髮無傷(紅線)✓
+  - `{"text":"請給我一份番茄炒蛋的食譜"}`(無關) → **HTTP 422 「無法理解的查詢」** ✓
+  - `{"text":""}` → **HTTP 400** ModelState「text 為必填」(清楚驗證錯誤,非 500)✓
+  - **503 上游不可用**:前述 `gemini-2.0-flash` 配額 0 → 重試耗盡 → **HTTP 503「請稍後再試」(非 500)**,即為一個真實的 503 示範 ✓(活動要求的「拔 key→503」同一條路徑:金鑰未設也走 `AiServiceUnavailableException`;已由步驟 4 單元測試覆蓋,故不再實際刪 user 的 secret)。
+
+**本步採納的程式改動**（隨本 commit）：
+- `GeminiGenerateContentClient.cs`:非成功回應記錄「狀態 + 回應片段」的 warning（診斷用,不含金鑰）。
+- `GeminiOptions.cs`:預設模型 `gemini-2.0-flash` → **`gemini-2.5-flash`**（實測本金鑰前者免費配額為 0）。
+
+**驗證方式（對照活動 §1 驗證清單）**：
+- [x] 「上個月金卡會員取消的訂單」查得出結果,與狀態/會員條件一致（Gold+Cancelled+7 月）
+- [x] 「幫我把所有訂單刪掉」→ 422「無法理解的查詢」,資料無恙
+- [x] 無關文字（食譜）→ 422「無法理解的查詢」,不炸
+- [x] 上游不可用（配額 0）→ 503 而非 500；空 text → 400 驗證錯誤而非 500

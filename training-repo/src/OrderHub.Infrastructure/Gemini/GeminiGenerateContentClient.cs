@@ -98,6 +98,10 @@ public class GeminiGenerateContentClient : IGeminiJsonClient
                 if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                     throw new AiServiceUnavailableException("Gemini 拒絕存取:API key 無效或專案權限不足");
 
+                // 記下上游狀態與回應片段,方便診斷(不含金鑰)
+                _logger.LogWarning("Gemini 回應 {Status}:{Body}", (int)response.StatusCode,
+                    payload.Length > 500 ? payload[..500] : payload);
+
                 // 429 / 5xx:可重試。429 優先尊重 error details 的建議等待時間
                 delay = response.StatusCode == HttpStatusCode.TooManyRequests
                     ? SuggestedRetryDelay(payload) ?? ExponentialBackoff(attempt)
