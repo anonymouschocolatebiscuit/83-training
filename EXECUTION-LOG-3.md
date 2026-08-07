@@ -77,7 +77,7 @@
 
 ---
 
-## 練習 1b — Infrastructure：Gemini client 與翻譯器　✅（commit 待填）
+## 練習 1b — Infrastructure：Gemini client 與翻譯器　✅（commit b43b7dd）
 
 **① Asked**：`Gemini/` 放 `GeminiOptions`、`IGeminiJsonClient`、Gemini client、`GeminiOrderQueryTranslator`。翻譯器**把模型輸出當不可信輸入**（反序列化 → DataAnnotations 驗證 → 白名單映射，任一步失敗回 null）。
 
@@ -105,3 +105,32 @@
 - [x] 反序列化 → 驗證 → 白名單映射，任一步失敗回 null；`intent != "search"` 回 null
 - [x] 金鑰未設定 / 重試耗盡 → `AiServiceUnavailableException`（step 3 Web 轉 503）
 - [~] 對真實 Gemini 的 structured output 實際回應形狀 —— **step 5 live 煙霧測試驗證**（需 user key）
+
+---
+
+## 練習 1c — Web：接線　✅（commit 待填）
+
+**① Asked**：`OrdersApiController` 提供 `POST /api/orders/search`，Controller 薄、只轉接 service，把「服務不可用」轉 503；`Program.cs` 接線。
+
+**② Done**：
+
+*計畫驗證子代理結論*：**Plan sound**，逐點 CONFIRMED（Web 已同時參照 Core+Infra；`AddHttpClient<,>` 在 ASP.NET 共用框架內、無需新套件；`CalculateTotal`/`ServiceResult` 成員/domain 屬性齊備；user-secrets `Gemini:ApiKey` 會綁到 `GeminiOptions.ApiKey`；DI 生命週期無 captive dependency）。修正/釐清：
+- **build blocker**：`Program.cs` 要加 `using OrderHub.Core.Ai;`、`using OrderHub.Infrastructure.Gemini;`（已加）；controller 的 usings 照活動原文（已含）。
+- `result.Value` 是 nullable → 用 `result.Value!`（活動原文已如此）。
+- **REFUTED**「一定要 `MapControllers` 才有屬性路由」：`MapControllerRoute` 與 `MapControllers` 共用同一 endpoint data source，屬性路由本就會生效；但加 `app.MapControllers()` 慣例且無害、無路由衝突（已加）。
+- 提醒：user-secrets 預設只在 **Development** 環境載入；非 Development 則回退環境變數 `GEMINI_API_KEY`，都沒有則擲 → 503（by design）。
+
+*實作*：
+- `Controllers/Api/OrdersApiController.cs`（照活動原文）：`[ApiController]`+`[Route("api/orders")]`，`[HttpPost("search")]`；失敗 → 422（`UnprocessableEntity`），成功 → `Ok` 投影（金額走 `IOrderService.CalculateTotal`）；`catch (AiServiceUnavailableException)` → 503。`SearchOrdersRequest.Text` 加 `[Required]`。
+- `Program.cs`：加 4 行 Gemini 接線（`Configure<GeminiOptions>`、`AddHttpClient<IGeminiJsonClient, GeminiGenerateContentClient>`、`AddScoped<IOrderQueryTranslator, GeminiOrderQueryTranslator>`、`AddScoped<IOrderSearchService, OrderSearchService>`）+ `app.MapControllers()`。
+- **未動 `appsettings.json`**（CLAUDE.md：改動前先問）；`Gemini:Model` 用 `GeminiOptions` 程式碼預設，`Gemini:ApiKey` 走 user-secrets。
+
+**③ Result**：
+
+- `dotnet build` → **0/0**。
+- **本步的「實作後驗證」= step 5 的 live 煙霧測試**（直接對真實 controller 端到端打 `POST /api/orders/search`，是最強的 after-check），故此處不另外派 review 子代理審 DI 接線（接線薄、已計畫驗證、build 綠）。
+
+**驗證方式（對照活動 §1c）**：
+- [x] `POST /api/orders/search` 路由與 controller 就位、build 綠
+- [x] Controller 裡沒有任何 Gemini/HttpClient 細節（全封裝在 Infrastructure）
+- [~] 「查得出結果 / 刪除→422 / 無關→unsupported / 拔 key→503」 —— **step 5 live 驗證**
