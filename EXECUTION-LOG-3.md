@@ -191,3 +191,34 @@
 - [x] 「幫我把所有訂單刪掉」→ 422「無法理解的查詢」,資料無恙
 - [x] 無關文字（食譜）→ 422「無法理解的查詢」,不炸
 - [x] 上游不可用（配額 0）→ 503 而非 500；空 text → 400 驗證錯誤而非 500
+
+---
+
+## 練習 2 — 同一個 service 接上網站頁面　✅（commit 待填）
+
+**① Asked**：體會分層的紅利——練習 1 的 `IOrderSearchService` **一行都不用改**,再接一個 MVC 入口。`GET /Orders/Search?q=...`,Controller 薄、View 綁 ViewModel、錯誤走頁面顯示。
+
+**② Done**：
+
+*探索（before）*：讀既有 `OrdersController`/`Index.cshtml`/`OrderRowViewModel`/`DisplayHelper`/`_ViewImports`,確認可**完全重用**——`OrderRowViewModel` 已存在、helper（`StatusBadgeClass`/`StatusLabel`/`Money`/`LocalTime`）由 `_ViewImports.cshtml` 的 `@using static ...DisplayHelper` 靜態匯入,活動範本的裸函式呼叫可直接用。
+
+*實作*（照活動原文）：
+- `ViewModels/OrderSearchViewModel.cs`（Query/ErrorMessage/`List<OrderRowViewModel>`/`HasSearched`）。
+- `OrdersController`：建構子多注入 `IOrderSearchService`,加 `Search(string? q, ct)` action——空 q 回空表單;否則呼叫**同一個** `SearchAsync`,失敗填 `ErrorMessage`、成功投影 `OrderRowViewModel`(與 Index 逐欄一致、金額走 `CalculateTotal`);`catch AiServiceUnavailableException` → 填 `ErrorMessage`(不變 500)。
+- `Views/Orders/Search.cshtml`（綁 `OrderSearchViewModel`、表格與 Index 一致、錯誤走 `alert-warning`）。
+- `_Layout.cshtml` 導覽列加「AI 查詢」入口（`asp-controller="Orders" asp-action="Search"`）。
+
+**③ Result**：
+
+- `dotnet build` → **0/0**;`dotnet test` → **49 綠**（web 變更不影響測試）。
+- **live 頁面實測**（app :5150）：
+  - 導覽列「AI 查詢」連結存在;`/Orders/Search` 標題「自然語言查訂單」。
+  - `?q=上個月金卡會員取消的訂單` → 頁面 2 列:#137 陳志明(已取消,2026-07-15)、#155 劉思穎(已取消,2026-07-07)——**與練習 1 API 結果一致**（分層紅利:同一 service）。
+  - `?q=幫我把所有訂單刪掉` → 頁面 `alert-warning`「無法理解的查詢」,非錯誤頁。
+- **實作 review 子代理結論：SHIP**。逐點確認:controller **零** Gemini/HttpClient 參照、重用 service 未複製邏輯、薄 controller、View 綁 ViewModel、錯誤不變 500、與 Index 一致、Razor 預設編碼無 XSS、DI 第 4 個建構子參數不破壞任何呼叫點。cosmetic nits（保留活動原文、僅記錄）：業務拒絕與上游中斷都用 `alert-warning`（API 端有分 422/503,頁面可考慮 `alert-danger` 區分）；nav 標籤「AI 查詢」與頁標題「自然語言查訂單」用字不同。
+
+**驗證方式（對照活動 §練習2）**：
+- [x] 頁面查「上個月金卡會員取消的訂單」,結果與練習 1 API 一致
+- [x] 「幫我把所有訂單刪掉」→ 頁面「無法理解的查詢」警示,非錯誤頁
+- [x] Controller 裡沒有任何 Gemini/HttpClient 細節（全封裝在 Infrastructure）
+- [~] 拔掉 key → 頁面清楚錯誤（同 API 的 `AiServiceUnavailableException` 路徑;已由單元測試 + step 5 的 503 覆蓋）
