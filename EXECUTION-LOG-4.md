@@ -82,3 +82,37 @@
 - [x] 獨立 commit
 
 ---
+
+## n8n 練習 1–3 的共同前置:schema 研究（一次性 before 驗證）
+
+**誠實的方法論調整**:活動的 n8n 練習 1–3 全靠瀏覽器 GUI 操作,無真程式碼可 build/test。三個練習**共用同一套 n8n 節點詞彙**(且練習 3 = 練習 2 + 一個 MCP 節點,是遞增的)。故我把「開工前對抗式驗證」對這三步**合併成一次**——派子代理用 WebSearch/WebFetch 對官方 n8n source/docs 查證我要用的每個節點的 `type` 字串、`typeVersion`、參數形狀、以及最容易錯的 **AI Agent 子節點連線形狀**(比照活動 3 把 1a/1b 合併的精神)。每個練習仍各自「實作 → 子代理 review → 記錄 → 獨立 commit」。
+
+**schema 研究子代理結論(關鍵已對齊官方 source 驗證)**:
+- 匯入最小需求:`name`/`nodes`/`connections`/`settings{executionOrder:"v1"}`;`id`/`versionId` 可省(n8n 匯入時自動配)。
+- 節點層開關(`alwaysOutputData` 等)在**節點頂層**,不在 `parameters` 內。
+- **AI 子節點連線**:以**子節點名為 key**,方向是**子節點 → agent**:`connections["<Gemini/MCP 節點名>"]["ai_languageModel"|"ai_tool"][0][0] = {node:"AI Agent", type:..., index:0}`(這是最易錯處,已明確驗證)。
+- 各節點:Webhook `responseMode:"responseNode"`;Set `assignments.assignments[]`+`includeOtherFields:true`;HTTP `sendBody/contentType:"json"/specifyBody:"json"/jsonBody`;Code `mode:"runOnceForAllItems"/language:"javaScript"/jsCode`;Agent `promptType:"define"/text`;Gemini `modelName` + 憑證型別 **`googlePalmApi`**;IF `conditions`(filter)+`{type:"number",operation:"gt"}`;GitHub resource/operation + owner/repo 為 resourceLocator + 憑證 `githubApi`;**Data Table `n8n-nodes-base.dataTable` 確實存在**(newer 節點,需先在 UI 建表拿 `dataTableId`);MCP Client Tool `@n8n/n8n-nodes-langchain.mcpClientTool`,`endpointUrl`/`serverTransport:"httpStreamable"`/`authentication:"none"`/`include:"selected"`/`includeTools:[...]`。
+- n8n 對匯入寬容:`typeVersion` 略有出入仍可匯入、打開再存即可;**必須精確的是 `type` 字串與連線 key**(已驗證)。
+
+產物一律放 `documents/references/n8n-workflows/`,並附 `README.md` 逐字手動步驟;GUI-only 步驟標 `[~]`。
+
+---
+
+## 練習 1 — Hello Webhook　✅（commit 見下）
+
+**① Asked**：n8n 最小迴路 trigger → 節點 → 回應。Webhook(POST、Respond 設「Using Respond to Webhook Node」)→ Edit Fields(加 `receivedAt={{ $now.toISO() }}`、Include Other Input Fields 開)→ Respond to Webhook(First Incoming Item)。
+
+**② Done**：產出 `01-hello-webhook.json`(3 節點 + 連線)+ README 練習 1 段落。JSON 已設好活動兩個最易漏的點:`responseMode:"responseNode"`(預設 _Immediately_ 會忽略 Respond 節點)、`includeOtherFields:true`(不開會丟掉送進來的 body)、`receivedAt` 值 `={{ $now.toISO() }}`(`=` 前綴才是 expression)。
+
+**③ Result**：
+
+- `ConvertFrom-Json` 驗證:**valid JSON**。
+- **實作 review 子代理結論:IMPORTABLE**。逐點 OK:三個 `type` 字串正確、三個關鍵參數值(`responseMode`/`includeOtherFields`/`respondWith`)正確、`receivedAt` expression 有 `=` 前綴、連線 keyed by source name 且 `main`/`index`/方向正確、節點名唯一無 dangling、envelope key 齊、每節點有 `id`/`position`/`typeVersion`。唯一 cosmetic nit:`webhookId:"hello"` 用了 path 而非 UUID(無害、不影響匯入)。
+- **GUI-only 部分誠實標 `[~]`**:匯入後複製 Test URL、按 Execute 進 120 秒監聽、打 request、看綠勾——都需真人在編輯器互動,自動化 session 無瀏覽器可點。JSON 已把節點/連線/易漏參數設完,真人只需匯入 + 按 Execute + 打一發。
+
+**驗證方式（對照活動 §練習1）**：
+- [x] workflow JSON 可匯入(schema 對齊官方 source、review 子代理判 IMPORTABLE)
+- [~] 回應含送的內容 + 時間戳 —— 需真人按 Execute 後打 request(GUI-only)
+- [~] 理解 Test URL vs Production URL 差別 —— 概念已寫進 README;實際監聽需真人操作
+
+---
