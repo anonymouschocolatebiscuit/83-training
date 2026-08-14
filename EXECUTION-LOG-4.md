@@ -116,3 +116,30 @@
 - [~] 理解 Test URL vs Production URL 差別 —— 概念已寫進 README;實際監聽需真人操作
 
 ---
+
+## 練習 2 — 退單巡檢日報（主菜）　✅（commit 見下）
+
+**① Asked**：端到端流程——排程 → 查近 30 天取消訂單(打**活動 3 的 `/api/orders/search`**,零新程式碼)→ AI Agent(Gemini)寫日報 → IF 退單筆數>0 → true 開 GitHub issue + 通知、false 存 Data Table 歸檔。
+
+**② Done**：產出 `02-退單巡檢日報.json`(**9 節點**)+ README 練習 2 段落。流程:`Schedule Trigger → 查退單(HTTP) → 整理筆數(Code) → AI Agent(+Gemini) → IF → {true: 開 GitHub Issue → 通知; false: 歸檔 Data Table}`。JSON 已處理活動點名的每個地雷:
+- HTTP `alwaysOutputData:true` 放**節點頂層**(放錯進 parameters 會被忽略、歸檔分支永不執行)。
+- `整理筆數` Code 先濾掉 Always Output Data 的空 item 再算 `count`,輸出單一 `{count, orders}`;**節點名精確為「整理筆數」**供 IF 跨節點引用。
+- IF 左值 `={{ $('整理筆數').first().json.count }}`(AI 輸出已無 count,跨節點回頭拿)、Number `gt` `0`;`main[0]`=true→GitHub、`main[1]`=false→Data Table。
+- Gemini 子節點以 `ai_languageModel`、方向**子節點→agent** 連進 AI Agent。
+- GitHub 標題 `={{ $json.output.split('\n')[0] }}`(JSON 內寫 `\\n` 才會得到 JS 能 split 的真換行)、通知帶 `report`/`issueUrl`。
+- Gemini `modelName=models/gemini-2.5-flash`(活動寫的 3.5-flash 本金鑰不可用,沿用活動 3 落地決定)。
+- 憑證/表/URL 一律不隨 JSON 匯入,以占位字串標示並在 README 寫清楚真人步驟。
+
+**③ Result**：
+
+- `ConvertFrom-Json` 驗證:**valid JSON**,9 節點;實測 GitHub 標題 expression 含 literal `\n`、IF 左值跨節點引用正確、IF true→GitHub/false→Data Table 未接反。
+- **實作 review 子代理結論:IMPORTABLE(無 defect)**。8 個 critical check 全 OK,逐點確認:`alwaysOutputData` 在節點頂層✓、Gemini→Agent 用 `ai_languageModel` 且方向/命名一致✓、`整理筆數` 名稱與 IF 引用逐字相同✓、IF true/false 兩路未接反✓、所有連線引用的節點名(含中文名)都存在無 typo✓、所有 expression `=` 前綴正確✓、資料來源正確(`$json` 來自上游整理筆數、通知用跨節點 `$('AI Agent')` + GitHub 自身 `$json.html_url`)✓、每節點 type/typeVersion/position/id/name 齊✓。
+- **GUI-only 部分誠實標 `[~]`**:Gemini 金鑰、GitHub PAT + repo、Data Table 實體表/`dataTableId`、練習 1 Production URL——都是帳號/環境綁定且 n8n 不匯出憑證,必須真人在 GUI 建;按 Execute 看 issue/歸檔也是編輯器互動。JSON 已把 9 節點、所有連線(含 AI 子節點連線與 IF 兩路)、所有 expression 與易漏參數設定完成。
+
+**驗證方式（對照活動 §練習2）**：
+- [x] workflow 結構與 expression 正確、可匯入(schema 對齊官方 source、review 判 IMPORTABLE)
+- [~] Execute 後開 GitHub issue、收通知、日報數字與 `/Orders` 篩「已取消」一致 —— 需真人填憑證後執行
+- [~] 改成查不到的條件 → 存 Data Table、不開 issue —— 需真人執行
+- [x] 思考題「查什麼、怎麼查也交給 AI 自由發揮會失去什麼」→ 已答於 `documents/PROCESS.md` 第四階段
+
+---
