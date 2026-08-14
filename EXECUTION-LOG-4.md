@@ -40,3 +40,45 @@
 - Git：branch = main，**只做本地 commit，不 push**（比照活動 2/3）。程式在 `training-repo/`，執行紀錄在 repo 根目錄。
 
 ---
+
+## 補齊 — MCP server 加開 HTTP transport（活動 2 的延伸）　✅（commit 見下）
+
+**① Asked**：活動 2 的 server 走 stdio;但 n8n 的 MCP 節點只支援 SSE / streamable HTTP,不支援 stdio,所以練習 3 之前要幫**同一個** server 加開 HTTP 入口。工具、Resource、Prompt 一行都不改,只換 transport。帶 `--http` 走 HTTP(:3001),預設照舊走 stdio。
+
+**② Done**：
+
+*落地決定（誠實標註，與活動文件的差異）*：活動文件假設 csproj 的 `ModelContextProtocol` 鎖在 `2.0.0-preview.2`,要我用 `dotnet add ... --version 2.0.0-preview.2`。但**本 repo 實際鎖的是 `2.0.0` 正式版**(`OrderHub.Mcp.csproj:10`)。若照文件加 preview.2 會與正式版打架、restore NU1605 降版錯。故 `ModelContextProtocol.AspNetCore` 版本對齊 **`2.0.0` 正式版**(非 `--prerelease`、非 preview.2)。
+
+*計畫驗證子代理（唯讀、對抗式）結論*:**全 CONFIRMED**,關鍵確認:
+- `ModelContextProtocol.AspNetCore 2.0.0` 是**真實已發布版本**,其 nuspec 對 net8.0 宣告 `<dependency id="ModelContextProtocol" version="[2.0.0]" />`——**精確鎖 `[2.0.0]`,與本機 2.0.0 相符,不會 NU1605**(本機 nuget cache 尚無此套件,restore 需連網,已成功)。
+- API 面實測(反射真實 net8 assembly):`WithHttpTransport(Action<HttpServerTransportOptions>)`、`HttpServerTransportOptions.Stateless`(bool)、`MapMcp(IEndpointRouteBuilder, string pattern="")` **在 2.0.0 都存在**;這兩個方法只在 AspNetCore assembly、不在 core(正如假設)。
+- `MapMcp()` 預設 pattern=`""` → streamable HTTP 端點掛在**根路徑 `/`**;JSON-RPC client 要 POST 到 `http://localhost:3001/`(非 `/mcp`、非 `/sse`;`/sse` 需 `EnableLegacySse=true` 且與 `Stateless=true` 互斥)。
+- 機器有 `Microsoft.AspNetCore.App 8.x` 共用框架;`FrameworkReference` 在 net8 console Exe 可用(且 AspNetCore 套件已隱含帶入,顯式保留只為對齊活動文件、無害)。
+- **必守**:stderr-logging 那行(`LogToStandardErrorThreshold`)是 **stdio 分支的命脈**(stdout 是協定通道),只能留在 stdio 分支,不可進共用 helper、不可進 HTTP 分支。
+
+*實作*：
+- `OrderHub.Mcp.csproj`:加 `<PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />` + `<FrameworkReference Include="Microsoft.AspNetCore.App" />`。
+- `Program.cs`:`if (args.Contains("--http"))` → `WebApplication.CreateBuilder` + `AddMcpServer().WithHttpTransport(o => o.Stateless = true).WithTools/Resources/Prompts` + `app.MapMcp()` + `app.Run("http://localhost:3001")`;`else` → **stdio 原樣**(含 stderr-logging 那行)。兩分支共用 `static void AddOrderHubServices(...)`(DbContext + 3 repo + IOrderService,全 Scoped,與原本逐字等價)。工具/資源/提示註冊兩邊**字元級相同**。
+
+**③ Result**：
+
+- `dotnet build` → **0/0**;`dotnet test` → **49 綠**(stdio 分支行為不變,測試不受影響)。restore 成功、**無 NU1605**。
+- **實作 review 子代理結論:SHIP-WITH-NITS**——無正確性 bug、無 stdio 退步、無 DI/scope 風險(singleton server 在 streamable HTTP 下每請求開 scope 解析 Scoped DbContext,`get_order` HTTP 實測證實)、無 CLAUDE.md 違規(只有 composition root 碰 DbContext;`AddOrderHubServices` 抽取是為「兩 transport 註冊一致」的任務需求,非無關重構;套件是活動明確授權)。採納其兩個註解 nit:把「port 被占用會自動另選」的**誤導註解**改成「會擲例外、需自行釋放/改 port」;在 HTTP 分支加註「這裡 log 走 stdout 沒問題、勿把 stderr 那行複製過來」。
+
+**HTTP 端到端驗證（最強證據，實際打 `http://localhost:3001/`）**：
+- `tools/list` → **4 個工具**:`customer_orders`、`get_order`、`low_stock`(皆 `readOnlyHint:true`)、`cancel_order`(`destructiveHint:true, idempotentHint:false`)——annotations 完整保留。
+- `resources/list` → `orderhub://discount-rules`(會員折扣規則,`text/markdown`)。
+- `prompts/list` → `low_stock_report`(參數 `threshold`,選填)。
+- `tools/call get_order {id:1}` → 完整訂單 JSON:客戶 蔡承翰/Standard、3 個品項、`Subtotal:12660.00`、`DiscountRate:0`、**`Total:12660.00`**——**與活動 2 EXECUTION-LOG-2 記錄的 stdio `get_order(1)` 數值完全一致**(Standard、Total 12660)。
+- Stateless 模式下**免 initialize 握手**即可直接 `tools/list`/`tools/call`(每請求獨立),符合 `Stateless = true` 設計。
+
+**stdio 未變驗證（不帶 `--http`，JSON-RPC over stdio，比照活動 2）**：
+- `initialize` → `notifications/initialized` → `tools/list` → **列出全部 4 個工具**(`customer_orders, get_order, low_stock, cancel_order`)。
+- `tools/call get_order {id:1}` → 回完整訂單(含各 LineTotal 與 `Total:12660`)。→ stdio 路徑一切正常,`.mcp.json`/Codex 設定完全不用動。
+
+**驗證方式（對照活動「補齊」清單）**：
+- [x] Streamable HTTP、URL `http://localhost:3001`:四個工具、resource、prompt 都列得出來(用 JSON-RPC 直打,非瀏覽器 Inspector——自動化 session 無 GUI,同活動 2 用 `--cli`/自寫 client 的精神)
+- [x] 不帶 `--http` 照舊走 stdio:`tools/list` + `get_order` 皆正常
+- [x] 獨立 commit
+
+---

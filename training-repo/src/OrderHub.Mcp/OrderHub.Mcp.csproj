@@ -8,6 +8,13 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Hosting" Version="8.0.1" />
     <PackageReference Include="ModelContextProtocol" Version="2.0.0" />
+    <!-- 活動 4 補齊:HTTP transport 給 n8n 的 MCP 節點用。版本與上面的 ModelContextProtocol 對齊 2.0.0 正式版,避免 NU1605 -->
+    <PackageReference Include="ModelContextProtocol.AspNetCore" Version="2.0.0" />
+  </ItemGroup>
+
+  <!-- console 專案借用 ASP.NET Core 共用框架才能開 HTTP 端點(AspNetCore 套件已隱含帶入,顯式保留以對齊活動文件) -->
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
   </ItemGroup>
 
   <PropertyGroup>
