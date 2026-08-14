@@ -73,3 +73,32 @@ JSON 裡已設好活動點名的幾個關鍵:
 - [~] Execute 後開出 GitHub issue、收到通知、日報數字與 `/Orders` 篩「已取消」一致 — 需真人填憑證後執行
 - [~] 改成查不到的條件 → 存進 Data Table、不開 issue — 需真人執行
 - [x] 思考題「查什麼、怎麼查也交給 AI 自由發揮會失去什麼」→ 已答於 `documents/PROCESS.md` 第四階段
+
+---
+
+## 練習 3 — MCP 合體：讓流程裡的 AI 會用你的工具（`03-mcp-deep-dive.json`）
+
+**目標**:日報不只列清單,還「深挖」——AI Agent 用**活動 2 的 MCP 工具**查每筆退單的明細,日報引用真實品項與金額。此 workflow = 練習 2 **加一個 MCP Client Tool 子節點**掛上 AI Agent,並在 System Message 加一句要求深挖。
+
+**與練習 2 的差異(只加不改)**:
+- 多一個節點 `MCP Client Tool (orderhub get_order)`:`endpointUrl=http://localhost:3001`、`serverTransport=httpStreamable`、`authentication=none`、`include=selected`、`includeTools=["get_order"]`。
+- 以 `ai_tool` 連線(方向**子節點→agent**)掛上 `AI Agent`。
+- System Message 尾端多一句:「對每筆取消的訂單,先用工具查出品項明細與會員等級,日報中引用查到的實際數字。」
+
+**只掛 `get_order`,絕不掛 `cancel_order`**:巡檢是無人流程,只需要「讀」。`cancel_order` 這種**寫入/破壞性**工具絕不掛進無人流程——這正是活動 1 approval 哲學在這裡的形狀:「根本不給工具」。JSON 的 `includeTools` 只有 `get_order`,整份檔案沒有出現 `cancel_order`。
+
+### 匯入後要真人做的步驟
+
+1. **先啟動補齊的 HTTP 版 MCP server**:`dotnet run --project src/OrderHub.Mcp -- --http`(監聽 `http://localhost:3001`,即本活動「補齊」段落做好且已驗證的那個)。
+2. `[~]` 同練習 2 的憑證步驟(Gemini 金鑰、GitHub PAT + repo、Data Table、通知 URL)——若你是在練習 2 的 workflow 上加節點,這些已設好。
+3. `[~]` **Execute Workflow** 後,到 **Executions** 分頁點開這次執行 → 點 `AI Agent` 節點,右側 log 會列出 agent 每一次工具呼叫(`get_order`)的輸入與輸出——這是驗證「有沒有真的深挖」的直接證據。
+4. 若你的 n8n 版本把 streamable HTTP 端點路徑處理得不同(例如需要 `/mcp` 尾綴),把 `endpointUrl` 跟著改;本專案 `MapMcp()` 掛在**根路徑**,故用 `http://localhost:3001`。
+
+**為何 Execute/看執行紀錄標 `[~]`**:工具呼叫證據在 n8n 的 Executions log 裡,需真人在瀏覽器按 Execute 並展開節點檢視。**但 MCP server 這端我已在「補齊」段落用 JSON-RPC over HTTP 對 `http://localhost:3001` 實測過** `get_order`(回訂單明細、`Total:12660`),所以 n8n 一旦連上、agent 一旦呼叫,拿到的就是這個真實回應。
+
+**驗證清單(對照活動)**:
+
+- [x] workflow JSON 可匯入、MCP 節點只含 `get_order`、以 `ai_tool` 掛上 agent(schema 對齊官方 source、review 子代理驗證)
+- [x] MCP server HTTP 端 `get_order` 已實測可用(見「補齊」段落)
+- [~] 執行紀錄看得到 agent 對退單呼叫 `get_order`、日報引用真實品項金額 —— 需真人 Execute 後看 Executions log
+- [x] 「有深挖 vs 沒深挖」的日報差異對照 → 已答於 `documents/PROCESS.md` 第四階段

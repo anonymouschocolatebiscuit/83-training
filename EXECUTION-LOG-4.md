@@ -143,3 +143,26 @@
 - [x] 思考題「查什麼、怎麼查也交給 AI 自由發揮會失去什麼」→ 已答於 `documents/PROCESS.md` 第四階段
 
 ---
+
+## 練習 3 — MCP 合體：讓流程裡的 AI 會用你的工具　✅（commit 見下）
+
+**① Asked**：日報「深挖」——AI Agent 用**活動 2 的 MCP 工具**查每筆退單明細,引用真實品項與金額。= 練習 2 加一個 MCP Client Tool 子節點掛上 AI Agent + System Message 加一句。
+
+**② Done**：產出 `03-mcp-deep-dive.json`(**10 節點** = 練習 2 的 9 節點 + MCP Client Tool)+ README 練習 3 段落。新增節點 `MCP Client Tool (orderhub get_order)`:`endpointUrl=http://localhost:3001`(指向本活動「補齊」做好的 HTTP MCP,`MapMcp()` 掛根路徑)、`serverTransport=httpStreamable`、`authentication=none`、`include=selected`、`includeTools=["get_order"]`,以 `ai_tool`(方向子節點→agent)掛上 AI Agent;System Message 尾端加「對每筆取消的訂單,先用工具查出品項明細與會員等級,日報中引用查到的實際數字」。其餘節點/連線與練習 2 逐一相同。
+
+**只掛 `get_order`,不掛 `cancel_order`(安全紅線)**:巡檢是無人流程只需「讀」;寫入/破壞性工具**絕不掛進無人流程**——活動 1 approval 哲學在此的形狀是「根本不給工具」。`includeTools` 只有 `get_order`,整份檔案不含 `cancel_order`/`low_stock`/`customer_orders`(review 子代理 grep 0 次確認)。
+
+**③ Result**：
+
+- `ConvertFrom-Json` 驗證:**valid JSON**,10 節點;MCP 節點參數與 `ai_tool` 連線、只含 `get_order`、System Message 深挖句、`cancel_order` 全檔不存在——皆實測確認。
+- **實作 review 子代理結論:IMPORTABLE**。7 個 check 全 OK:MCP type/五參數精確✓、**安全:`includeTools` 只 `get_order`、`cancel_order` 全檔 0 次**✓、MCP 以 `ai_tool` 連 agent 且 name/key 逐字相符✓、Gemini `ai_languageModel` 連線未被弄壞✓、核心流程與練習 2 結構相同無退步(IF true/false 未接反、`alwaysOutputData` 仍頂層、`整理筆數` 名稱與 IF 引用完好、expression 仍 `=` 前綴含 GitHub title `\n`)✓、System Message 保留原文 + 深挖句✓、JSON 完整且所有連線端點都指向存在的節點名✓。(子代理文中一處寫「8 nodes」為其筆誤,我方 `ConvertFrom-Json` 實測為 10 節點且所有引用完整,不影響結論。)
+- **端到端最強證據**:MCP server 的 HTTP 端 `get_order` **已在「補齊」段落用 JSON-RPC over HTTP 實測可用**(回訂單明細、`Total:12660`)。故 n8n 一旦連上、agent 一旦呼叫,拿到的即為此真實回應。
+- **GUI-only 部分誠實標 `[~]`**:按 Execute + 到 Executions log 看 agent 對退單呼叫 `get_order` 的輸入/輸出,需真人在瀏覽器操作。
+
+**驗證方式（對照活動 §練習3）**：
+- [x] workflow 可匯入、MCP 節點只含 `get_order`、以 `ai_tool` 掛上 agent(schema 對齊、review IMPORTABLE)
+- [x] MCP server HTTP 端 `get_order` 已實測可用(補齊段落)
+- [~] 執行紀錄看得到 agent 呼叫 `get_order`、日報引用真實品項金額 —— 需真人 Execute 後看 Executions log
+- [x] 「有深挖 vs 沒深挖」的日報差異對照 → 已答於 `documents/PROCESS.md` 第四階段
+
+---

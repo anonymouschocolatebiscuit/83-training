@@ -1,0 +1,215 @@
+{
+  "name": "活動4 練習3 — MCP 合體 (深挖明細)",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            { "field": "days", "daysInterval": 1, "triggerAtHour": 9, "triggerAtMinute": 0 }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [0, 0],
+      "id": "33333333-3333-4333-8333-333333333301",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://localhost:5150/api/orders/search",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "json",
+        "jsonBody": "{ \"text\": \"過去 30 天取消的訂單\" }",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [220, 0],
+      "id": "33333333-3333-4333-8333-333333333302",
+      "name": "查退單 (search API)",
+      "alwaysOutputData": true
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "language": "javaScript",
+        "jsCode": "// Always Output Data 在空結果時會給一個空 item,先濾掉再算筆數\nconst orders = $input\n  .all()\n  .map((i) => i.json)\n  .filter((o) => o.id !== undefined);\nreturn [{ json: { count: orders.length, orders } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [440, 0],
+      "id": "33333333-3333-4333-8333-333333333303",
+      "name": "整理筆數"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=以下是近 30 天取消訂單的查詢結果 JSON(count 為筆數):{{ JSON.stringify($json) }}",
+        "options": {
+          "systemMessage": "你是 OrderHub 的退單巡檢助理。只根據提供的資料寫中文日報,不要編造數字。第一行用一句話摘要(會當 issue 標題),其後列出:總筆數、總金額、值得注意的訂單(高金額或高等級會員)。count 為 0 時只回『本日無退單』。對每筆取消的訂單,先用工具查出品項明細與會員等級,日報中引用查到的實際數字。"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 1.7,
+      "position": [660, 0],
+      "id": "33333333-3333-4333-8333-333333333304",
+      "name": "AI Agent"
+    },
+    {
+      "parameters": {
+        "modelName": "models/gemini-2.5-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatGoogleGemini",
+      "typeVersion": 1,
+      "position": [560, 220],
+      "id": "33333333-3333-4333-8333-333333333305",
+      "name": "Google Gemini Chat Model"
+    },
+    {
+      "parameters": {
+        "endpointUrl": "http://localhost:3001",
+        "serverTransport": "httpStreamable",
+        "authentication": "none",
+        "include": "selected",
+        "includeTools": ["get_order"]
+      },
+      "type": "@n8n/n8n-nodes-langchain.mcpClientTool",
+      "typeVersion": 1.2,
+      "position": [760, 220],
+      "id": "33333333-3333-4333-8333-333333333310",
+      "name": "MCP Client Tool (orderhub get_order)"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": { "caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 2 },
+          "combinator": "and",
+          "conditions": [
+            {
+              "id": "cccc3333-3333-4333-8333-333333333301",
+              "leftValue": "={{ $('整理筆數').first().json.count }}",
+              "rightValue": 0,
+              "operator": { "type": "number", "operation": "gt" }
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [880, 0],
+      "id": "33333333-3333-4333-8333-333333333306",
+      "name": "IF 退單筆數>0"
+    },
+    {
+      "parameters": {
+        "resource": "issue",
+        "operation": "create",
+        "owner": { "__rl": true, "mode": "name", "value": "你的GitHub帳號" },
+        "repository": { "__rl": true, "mode": "name", "value": "你的training-repo名稱" },
+        "title": "={{ $json.output.split('\\n')[0] }}",
+        "body": "={{ $json.output }}",
+        "labels": [],
+        "assignees": []
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1.1,
+      "position": [1120, -120],
+      "id": "33333333-3333-4333-8333-333333333307",
+      "name": "開 GitHub Issue"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "貼上練習1 Activate 後的 Production URL",
+        "sendBody": true,
+        "contentType": "json",
+        "specifyBody": "keypair",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "report", "value": "={{ $('AI Agent').first().json.output }}" },
+            { "name": "issueUrl", "value": "={{ $json.html_url }}" }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1340, -120],
+      "id": "33333333-3333-4333-8333-333333333308",
+      "name": "通知 (打練習1 webhook)"
+    },
+    {
+      "parameters": {
+        "resource": "row",
+        "operation": "insert",
+        "dataTableId": { "__rl": true, "mode": "list", "value": "巡檢紀錄" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "date": "={{ $now.toFormat('yyyy-MM-dd') }}",
+            "note": "本日無退單"
+          }
+        }
+      },
+      "type": "n8n-nodes-base.dataTable",
+      "typeVersion": 1,
+      "position": [1120, 140],
+      "id": "33333333-3333-4333-8333-333333333309",
+      "name": "歸檔 (Data Table)"
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [ { "node": "查退單 (search API)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "查退單 (search API)": {
+      "main": [
+        [ { "node": "整理筆數", "type": "main", "index": 0 } ]
+      ]
+    },
+    "整理筆數": {
+      "main": [
+        [ { "node": "AI Agent", "type": "main", "index": 0 } ]
+      ]
+    },
+    "Google Gemini Chat Model": {
+      "ai_languageModel": [
+        [ { "node": "AI Agent", "type": "ai_languageModel", "index": 0 } ]
+      ]
+    },
+    "MCP Client Tool (orderhub get_order)": {
+      "ai_tool": [
+        [ { "node": "AI Agent", "type": "ai_tool", "index": 0 } ]
+      ]
+    },
+    "AI Agent": {
+      "main": [
+        [ { "node": "IF 退單筆數>0", "type": "main", "index": 0 } ]
+      ]
+    },
+    "IF 退單筆數>0": {
+      "main": [
+        [ { "node": "開 GitHub Issue", "type": "main", "index": 0 } ],
+        [ { "node": "歸檔 (Data Table)", "type": "main", "index": 0 } ]
+      ]
+    },
+    "開 GitHub Issue": {
+      "main": [
+        [ { "node": "通知 (打練習1 webhook)", "type": "main", "index": 0 } ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {},
+  "meta": {}
+}
