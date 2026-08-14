@@ -166,3 +166,28 @@
 - [x] 「有深挖 vs 沒深挖」的日報差異對照 → 已答於 `documents/PROCESS.md` 第四階段
 
 ---
+
+## 最終總結（活動 4）
+
+| 步驟 | commit | 內容 | 驗證 |
+| --- | --- | --- | --- |
+| 基線 | 9d42fe0 | EXECUTION-LOG-4 + 可行性切分 | build 0/0、test 49 綠 |
+| 補齊 | ada0c4d | MCP 雙 transport（stdio 不變 + `--http` on :3001）| 計畫子代理全 CONFIRMED、review SHIP-WITH-NITS、**HTTP 端到端 JSON-RPC 實測**（tools/resources/prompts + get_order）、stdio 未變、49 綠 |
+| 練習 1 | b67f346 | `01-hello-webhook.json` + 手動步驟 | schema 子代理對官方 source 查證、review IMPORTABLE |
+| 練習 2 | 41c652e | `02-退單巡檢日報.json`（9 節點）+ 手動步驟 | review IMPORTABLE、8 critical check 全 OK |
+| 練習 3 | 975286c | `03-mcp-deep-dive.json`（10 節點）+ 手動步驟 | review IMPORTABLE、安全:只掛 `get_order` |
+| 收尾 | （本步）| PROCESS 第四階段 + README note + 本總結 | — |
+
+### 誠實的可行性切分（回顧）
+
+- **真程式碼交付（補齊 — MCP HTTP transport）完整做到底並端到端驗證**:這是活動 4 唯一的真程式碼,也是最強證據。`dotnet run --project src/OrderHub.Mcp -- --http` 在 `:3001` 跑起來,用 JSON-RPC over HTTP 實測 `tools/list`(4 工具、annotations 完整)、`resources/list`、`prompts/list`、`tools/call get_order`(`Total:12660`,與活動 2 stdio 一致);stdio 路徑經 JSON-RPC over stdio 驗證未變。build 0/0、test 49 綠、restore 無 NU1605。
+- **n8n 練習 1–3 產可匯入 JSON + 手動步驟**:自動化 session 無法點瀏覽器 GUI,故產出三個對齊官方 n8n source schema 的 workflow JSON(`documents/references/n8n-workflows/`)+ 逐字手動步驟;凡真人在 GUI 才能做的(建帳號、填 Gemini/GitHub 憑證、建 Data Table、按 Execute、看 Executions log)一律標 `[~]` 並註明原因。**未偽造任何截圖或「跑起來了」的宣稱。**
+
+### 落地決定與提醒（誠實標註）
+
+1. **套件版本**:活動假設 `ModelContextProtocol` 鎖 `2.0.0-preview.2`,但本 repo 實際鎖 **`2.0.0` 正式版**;故 `ModelContextProtocol.AspNetCore` 對齊 `2.0.0`(非 `--prerelease`、非 preview.2),否則 restore NU1605。(延續活動 2 的觀察:此套件已進正式版。)
+2. **模型名稱**:活動寫 `gemini-3.5-flash`,workflow JSON 一律用 **`gemini-2.5-flash`**(活動 3 實測落地)。
+3. **CLAUDE.md 遵守**:僅新增活動明確要求的 `ModelContextProtocol.AspNetCore`(已授權);未動 `appsettings.json`;未讀任何機密;未重構無關程式;`AddOrderHubServices` 抽取是「兩 transport 註冊一致」的任務需求。
+4. **只做本地 commit,未 push**(比照活動 2/3)。停伺服器一律按 port/PID(`Get-NetTCPConnection -LocalPort 3001` → `Stop-Process`),未用 `taskkill /IM dotnet.exe`。
+
+- 心得與兩題思考題（練習 2「查什麼怎麼查交給 AI 會失去什麼」、練習 3「深挖 vs 不深挖」）記於 [`documents/PROCESS.md`](documents/PROCESS.md)（第四階段）。

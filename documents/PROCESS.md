@@ -234,3 +234,93 @@ Claude Code，模型 Opus 4.8（1M context）。用兩個唯讀子代理做交�
 **一個必須提醒維護者更新的地方（照抄會 live 打不通）**:活動的 Gemini 端點/模型是**假想或未來形狀**——`POST /v1/interactions`、`input`/`response_format`、回應 `steps[].model_output`、模型 `gemini-3.5-flash`——與 Google **現行**的 `POST …/v1beta/models/{model}:generateContent`（`contents`/`parts` + `generationConfig.responseSchema`,回應 `candidates[0].content.parts[0].text`）**不一致**。我把傳輸層改成真實形狀才跑得通,安全每一層仍照活動。建議活動:(1) 改用真實 `generateContent` 形狀;(2) 提醒「**免費配額因模型而異**,先用 `GET …/v1beta/models?key=` 挑有 `generateContent` 且有免費配額的 flash 模型」——我實測本金鑰 `gemini-2.0-flash` 免費配額為 0、`gemini-2.5-flash` 可用;(3) `response_format`/schema 的 `type` 大小寫（真實 API 用大寫 `OBJECT`/`STRING`）。
 
 **一個給自動化 agent 的誠實邊界**:申請金鑰需真人在瀏覽器登入 Google、接受 ToS,我做不到;金鑰也不該進對話。這次由 user 存進 user-secrets、我只讀 HTTP 回應來驗證——是把「agent 不碰機密」落實成流程的好例子。
+
+---
+
+# 第四階段 — n8n 自動化：把人抽離流程（活動 4）心得
+
+> 完整逐步流水帳在專案根目錄 [`EXECUTION-LOG-4.md`](../EXECUTION-LOG-4.md)。可匯入的 workflow JSON + 手動步驟在 [`documents/references/n8n-workflows/`](references/n8n-workflows/)。以下是四問 + 自我驗證 + 兩題思考題 + 對這個訓練的看法。
+
+**使用的 agent 與模型**：Claude Code，Opus 4.8（1M context）。每步：計畫 → 對抗式子代理驗計畫 → 實作 → 子代理 review → 記錄 → 獨立本地 commit（不 push）。**一個誠實的邊界**：活動 4 的練習 1–3 全靠瀏覽器 GUI（`http://localhost:5678` 拖拉節點、填憑證、按 Execute），自動化 agent 無法點畫布。開工前我先跟 user 確認**可行性切分**（如活動 3 的金鑰決策）：唯一的真程式碼交付（補齊 — MCP HTTP transport）**完整做到底並端到端驗證**；n8n 練習則**產出可匯入的 workflow JSON + 逐字手動步驟**，GUI-only 步驟一律標 `[~]`，不偽造截圖、不假稱「跑起來了」。
+
+## 通用四問
+
+### 1. 我的任務拆解
+
+- 基線（build 0/0、test 49 綠）→ 補齊 MCP HTTP transport（真程式碼）→ 練習 1 webhook JSON → 練習 2 日報 JSON → 練習 3 MCP JSON → 收尾（PROCESS + README + 總結）。
+- 兩個實務調整：**(a)** n8n 練習 1–3 共用同一套節點詞彙、且練習 3 = 練習 2 + 一個 MCP 節點（遞增），所以「開工前對抗式驗證」對這三步**合併成一次 schema 研究**（派子代理對官方 n8n source 查證 `type` 字串／`typeVersion`／最易錯的 AI 子節點連線形狀），每個練習仍各自實作 → review → commit（比照活動 3 把 1a/1b 合併的精神）。**(b)** 套件版本對齊 **`2.0.0` 正式版**而非活動假設的 `2.0.0-preview.2`（本 repo 早已鎖正式版；照抄會 NU1605）。
+
+### 2. AI 幫上大忙的地方
+
+- **開工前用對抗式子代理鎖死「套件版本可行性」**，把最會爆的地方先確定。CLAUDE.md 禁止亂加套件、活動又假設一個和本 repo 不符的 preview 版本，所以我先問子代理：
+  > 「`ModelContextProtocol.AspNetCore 2.0.0`（正式版，非 prerelease）**存在且可還原**嗎？它的 nuspec 對 `ModelContextProtocol` 的相依是不是**精確鎖 `[2.0.0]`**（否則 NU1605）？`WithHttpTransport`/`MapMcp`/`Stateless` 在 2.0.0 **真的存在**嗎？`MapMcp()` 預設端點掛在哪個路徑？」
+  它逐條附證據回覆（nuspec 精確鎖 `[2.0.0]`、反射真實 assembly 確認三個 API 都在、端點掛**根路徑 `/`**）。**這直接決定了我第一次 build 就過、第一次打 HTTP 就對**——不必試錯降版或亂猜端點路徑。
+- **n8n schema 研究子代理**把「AI Agent 子節點怎麼連」這個最易錯的點釘死：連線以**子節點名為 key**、方向是**子節點 → agent**（`connections["Gemini節點"]["ai_languageModel"][0][0] = {node:"AI Agent",...}`）。手刻 JSON 若把方向或 key 名弄反，匯入後模型/工具會「看起來在畫布上、實際沒掛上」——這種錯很難 debug，先查證省掉一輪。
+
+### 3. AI 誤導我的地方，與我如何發現
+
+- **我自己的 stdio 驗證腳本誤報「server 壞了」**。驗證「不帶 `--http` stdio 未變」時，前兩次腳本回 STDOUT 長度 0，一度懷疑重構弄壞了 stdio。但 stderr 明明有 `transport reading messages`／`Application started`——server 有起來。真因是**我的測試法**：把 JSON-RPC 全部寫進 stdin 後**立刻關閉 stdin**，stdio transport 把 EOF 當斷線、在 flush 回應前就收攤。改成**保持 stdin 開著、同步 `ReadLineAsync` 逐行讀**，馬上拿到 `tools/list` 的 4 個工具與 `get_order` 的完整訂單。**靠讀 stderr（server 明明活著）+ 換掉自己的測試法抓到**——教訓同活動 1「別讓自己的驗證腳本誤導你」：問題常在**觀測方式**，不在被測物。（這也正是活動 2「Inspector CLI 把 `--project` 當旗標吃掉、不是 server 的錯」的翻版。）
+- **子代理一處筆誤（`8 nodes` vs 實際 10）**：練習 3 review 子代理內文把節點數寫成 8，但我方 `ConvertFrom-Json` 實測是 10 節點且所有連線引用完整。不因子代理講得篤定就照收——用可觀察的實測當裁判（延續活動 2 的教訓）。
+
+### 4. 我會帶回日常工作的一招
+
+- **接一個「編得過也未必連得上」的新傳輸／協定前，先用「最小可重跑的協定探針」隔離『我的程式』與『我的測試法』**。這次的操作步驟：(1) server 跑起來先**輪詢 port 是否 LISTENING**（別急著打）；(2) 用**與 client 同協定**的最小請求打一發（HTTP 走 JSON-RPC POST、stdio 走 keep-open 的 stdin + 同步讀）；(3) 回應**對照一個已知真值**（`get_order(1) Total=12660`，這數字活動 2 就記過）。三步都過才算「端到端」。這比「build 綠就宣稱好了」可靠得多——build 只證明編得過，協定層要另外拿真值比對。
+
+## 自我驗證（第四階段 — n8n / MCP HTTP）
+
+補齊（MCP HTTP transport）
+1. [x] `dotnet run --project src/OrderHub.Mcp -- --http` 在 `:3001` 起得來；JSON-RPC over HTTP：`tools/list`=4 工具（annotations 完整）、`resources/list`=`discount-rules`、`prompts/list`=`low_stock_report`、`tools/call get_order{id:1}`→`Total:12660`（與活動 2 stdio 一致）。
+2. [x] 不帶 `--http` 走 stdio：`tools/list`=4 工具、`get_order` 回完整訂單——**行為不變**，`.mcp.json`/Codex 設定不用動。
+3. [x] 工具/Resource/Prompt **一行未改**，只換 transport；`build` 0/0、`test` 49 綠、restore 無 NU1605。
+4. [x] 版本對齊 `2.0.0` 正式版（非 preview.2）；stderr-logging 只留 stdio 分支；`AddOrderHubServices` 兩 transport 共用、註冊字元級相同。
+
+練習 1（Hello Webhook）
+1. [x] `01-hello-webhook.json` 可匯入：`responseMode:"responseNode"`（易漏，預設 _Immediately_ 會忽略 Respond 節點）、`includeOtherFields:true`（不開會丟 body）、`receivedAt={{ $now.toISO() }}` 都設好。
+2. [~] 按 Execute 進 120 秒監聽、打 request、看綠勾 —— GUI-only，需真人操作（README 已寫步驟）。
+
+練習 2（退單巡檢日報）
+1. [x] `02-退單巡檢日報.json` 9 節點可匯入、結構與 expression 正確（review 判 IMPORTABLE、8 critical check 全 OK）。查詢直接打**活動 3 的 `/api/orders/search`**，零新程式碼。
+2. [x] 地雷全處理：`alwaysOutputData` 節點頂層、`整理筆數` 濾空 item、IF 用 `$('整理筆數')` 跨節點拿 `count`、IF true→GitHub/false→Data Table 未接反、Gemini 以 `ai_languageModel` 連進 agent。
+3. [~] Execute 後開 GitHub issue／收通知／Data Table 歸檔、日報數字與 `/Orders` 篩「已取消」比對 —— 需真人填 Gemini 金鑰、GitHub PAT、建表後執行。
+
+練習 3（MCP 合體）
+1. [x] `03-mcp-deep-dive.json` 10 節點可匯入：MCP Client Tool（`http://localhost:3001`、`httpStreamable`）以 `ai_tool` 掛上 AI Agent；System Message 加深挖句。
+2. [x] **安全紅線**：`includeTools` 只 `get_order`，全檔不含 `cancel_order`／`low_stock`／`customer_orders`（子代理 grep 0 次確認）——無人流程只給「讀」。
+3. [x] MCP server HTTP 端 `get_order` **已在補齊段落實測可用**；n8n 一連上、agent 一呼叫，拿到的就是那個真實回應。
+4. [~] Executions log 看 agent 對退單呼叫 `get_order`、日報引用真實品項金額 —— 需真人 Execute 後在瀏覽器展開節點看。
+
+## 兩題思考題
+
+### （練習 2）如果「查什麼、怎麼查」也交給 AI Agent 自由發揮，會失去什麼？
+
+失去三樣**恰好是活動 1–3 一路建起來的東西**：
+
+1. **失去活動 3 的白名單防線**。現在的分工是：n8n 的 HTTP Request 打**活動 3 的 `/api/orders/search`**，中文→查詢參數的翻譯、`[AllowedValues]` enum/日期白名單、`!HasAnyFilter` 拒絕空查詢、`Take(100)` 上限、「LLM 只產參數、永不產 SQL」這兩道防線——**全在產品程式碼裡做完了**，n8n 只做編排。若把「查什麼、怎麼查」也丟給 n8n 裡的 AI Agent 自由發揮（例如讓它自己決定要打哪個 endpoint、自己拼查詢甚至自己組 SQL），這整套防線就被繞過了：模型輸出重新變成「未經白名單的可信輸入」，活動 3「安全對待模型輸出」那一課直接作廢。**業務邏輯該放在有測試、有防線的產品層，不是放在編排層的 prompt 裡。**
+
+2. **失去可測試性 / 可重現性**。API 版的查詢有 15 個離線單元測試把每條紅線固化（`"99"`→null、壞日期→null、刪除意圖→422…），是不依賴金鑰、可重跑的回歸測試。若查詢邏輯活在 AI Agent 的自由發揮裡，**同一句話今天明天可能查出不同東西**（模型不確定性 + 沒有強型別介面可 assert），CI 擋不住回歸，出事也難複現。
+
+3. **失去日報數字的可信度**。目前 AI **只做摘要**：拿到的是查詢結果 JSON，System Message 明令「只根據提供的資料寫、不要編造數字」。數字的真實性由**確定性的 SQL 查詢**保證，AI 只是換句話說。若連「查什麼」都交給 AI，日報裡的「本月取消 N 筆、總額 M 元」就沒有一個可稽核的查詢當靠山——**摘要可以交給 AI，事實的來源不行**。這正是把 LLM 放進產品的核心心法：**讓 AI 做它擅長的（自然語言摘要），把事實與安全留給有防線、有測試的確定性程式碼。**
+
+### （練習 3）同一批退單，有深挖 vs 沒深挖的日報差異
+
+- **沒深挖（練習 2）**：AI Agent 只拿到 `search API` 回的**摘要六欄**（`id/customerName/tier/status/total/createdAt`）。日報只能寫到這個顆粒度：「本月取消 N 筆、總額 M 元、其中 #137 金額最高／是金卡會員」。**看得到「哪幾筆、多少錢」，但看不到「買了什麼」**——無法回答「取消的都是哪類品項？是不是某個 SKU 特別容易被退？」
+
+- **有深挖（練習 3）**：AI Agent 多了 `get_order` 這個 MCP 工具，System Message 要求「對每筆取消的訂單，先用工具查出品項明細與會員等級」。於是日報能寫到**品項顆粒度**：「#1 取消含 SKU-1044 晨光 USB-C 集線器 ×2（6220 元）、SKU-1009 極光 HDMI 傳輸線 ×1…」——引用的是 `get_order` 回的**真實 `UnitPriceSnapshot`/`LineTotal`/`Total:12660`**（我在補齊段落實測過的那個回應），不是 AI 編的。
+
+- **差異的本質**：練習 2 的資料是**一次查詢的固定投影**（摘要），練習 3 讓 AI **按需、逐筆向 MCP 工具拉更深的資料**（明細）。前者是「AI 摘要一張報表」，後者是「AI 帶著工具去調查」。**代價**是多了 N 次工具往返（每筆退單一次 `get_order`）與對應的延遲／token；**收穫**是日報從「數量統計」升級成「可據以行動的品項級洞察」。**驗證證據**也不同：練習 3 可在 Executions log 看到 agent **實際的每次 `get_order` 呼叫輸入/輸出**，這是「有沒有真的深挖」最直接的證明——比起看日報文字，看工具呼叫紀錄更難造假。
+
+- **安全上的呼應**：深挖只掛 `get_order`（讀），**絕不掛 `cancel_order`（寫）**。同一個 MCP server 在活動 2 有破壞性工具，但放進無人巡檢流程時，用 `Tools to Include = Selected` **只給讀工具**——活動 1「破壞性操作要人確認」的哲學，在無人流程裡的形狀就是「根本不給那個工具」。深挖增加的是「讀得更細」，不該順手放大「能改的範圍」。
+
+## 我對這個訓練的看法
+
+**活動 4 是四個活動裡「收束」得最漂亮的一課——它讓前三課的每個決定都『兌現』了一次**：
+
+- **分層的紅利在這裡第三次兌現**。活動 3 已示範「同一個 `IOrderSearchService`，API 與網站頁面共用」；活動 4 更進一步——n8n 直接打**活動 3 的 API**（查詢邏輯零複製）、掛**活動 3 的 Gemini key**、透過**活動 2 的 MCP server** 深挖。「業務邏輯放產品層、編排放 n8n」這條線，到這裡變成看得見的架構事實：**換一個 orchestrator（從網站頁面換成 n8n），產品程式碼一行不用改。**
+- **「補齊 — MCP HTTP transport」是全訓練最優雅的一個註腳**：同一個 server，工具/Resource/Prompt 一行不改，只加一個 `--http` 分支換 transport，就從「agent 的本機子行程（stdio）」變成「n8n 可連的遠端服務（HTTP）」。這把活動 2 講的「MCP 分層設計」從口號變成**十幾行程式碼的實證**——transport 與 capability 正交，是這套協定最實際的紅利。
+- **人機協作的哲學是一以貫之的**：活動 1 教「破壞性操作要 approval」，活動 4 把它翻譯成無人流程的規則——`cancel_order` 這種寫入工具**根本不掛進流程**。安全不是加一道確認框，而是**在編排層就縮小 agent 能碰的表面積**。
+
+**兩個對維護者的誠實提醒（照抄會卡住）**：
+1. **套件版本**：活動假設 `ModelContextProtocol` 鎖 `2.0.0-preview.2`、要 `dotnet add ... --version 2.0.0-preview.2`；但本 repo 早已是 **`2.0.0` 正式版**，`ModelContextProtocol.AspNetCore` 必須跟著用 `2.0.0`（非 `--prerelease`），否則 restore NU1605。建議活動註明「若已用正式版，AspNetCore 套件版本要對齊你 csproj 現有的 `ModelContextProtocol` 版本」。（延續活動 2 已提過的「套件進正式版了」。）
+2. **模型名稱**：活動的 Gemini 節點寫 `gemini-3.5-flash`，但這顆在本金鑰不可用（活動 3 實測 `gemini-2.0-flash` 免費配額 0、`gemini-2.5-flash` 可用）。workflow JSON 已用 `models/gemini-2.5-flash`；建議活動提醒「模型名稱與免費配額會變，先確認你的金鑰對哪顆有配額」。
+
+**一個給自動化 agent 的誠實邊界（延續活動 2/3）**：n8n 是**瀏覽器 GUI 工具**——建 owner 帳號、拖拉節點、填憑證、按 Execute、看 Executions log，都需要真人在瀏覽器裡點。自動化 session 做不到，也不該假裝做到。這次的做法是把**能自動化的（MCP HTTP 真程式碼）做到端到端驗證**、把**不能自動化的（n8n GUI）產出可匯入 JSON + 逐字手動步驟並誠實標 `[~]`**——如同活動 2 用 Inspector `--cli`、活動 3 由 user 管金鑰，「劃清 agent 能與不能的界線、且不偽造」本身就是這個訓練想教的一種專業素養。
